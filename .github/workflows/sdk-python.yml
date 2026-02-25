@@ -21,13 +21,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: astral-sh/setup-uv@v5
 
-      # Build and install Rust engine into SDK venv
-      - name: Install maturin and build engine
-        run: |
-          uv tool install maturin
-          cd engine && VIRTUAL_ENV=../sdks/python/.venv maturin develop --features python --uv
-
-      # Install SDK deps and run tests
       - name: Install and test
         working-directory: sdks/python
         run: |

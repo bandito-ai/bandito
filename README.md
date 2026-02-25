@@ -78,7 +78,7 @@ This is a Cargo workspace with two Rust crates (`engine` and `cli`) plus two SDK
 
 ```bash
 # Rust engine tests (31 tests)
-cargo test -p bandito-engine
+cd engine && cargo test
 
 # CLI build
 cargo build -p bandito-cli

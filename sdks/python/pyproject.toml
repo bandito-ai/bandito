@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1.7"]
+build-backend = "maturin"
 
 [project]
 name = "bandito"
@@ -20,22 +20,20 @@ classifiers = [
 ]
 dependencies = [
     "httpx>=0.28.1",
-    "bandito-engine>=0.1.0",
 ]
 
 [project.urls]
 Homepage = "https://bandito.dev"
 Repository = "https://github.com/bandito-ai/bandito"
 
-[tool.setuptools.packages.find]
-include = ["bandito*"]
-
-[tool.uv.sources]
-bandito-engine = { path = "../../engine", editable = true }
+[tool.maturin]
+manifest-path = "../../engine/Cargo.toml"
+features = ["python"]
+module-name = "bandito._engine"
+python-packages = ["bandito"]
 
 [dependency-groups]
 dev = [
     "pytest>=9.0.2",
-    "pytest-asyncio>=0.24.0",
     "respx>=0.22.0",
 ]

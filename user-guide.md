@@ -87,13 +87,10 @@ bandito/
 
 ```bash
 # Run tests (no feature flags needed)
-cargo test -p bandito-engine
+cd engine && cargo test
 
 # Build WASM for JS SDK
 cd engine && wasm-pack build --target nodejs --out-dir pkg --features wasm
-
-# Build Python extension into SDK venv
-cd engine && maturin develop --features python
 ```
 
 ### CLI

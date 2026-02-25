@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from bandito_engine import BanditEngine
+from bandito._engine import BanditEngine
 from tests.conftest import ARM_DATA, EXPECTED_DIMS
 
 

@@ -11,7 +11,7 @@ use crate::engine::BanditEngineCore;
 /// Python-facing BanditEngine. Holds all Bayesian state for one bandit.
 ///
 /// Usage:
-///     from bandito_engine import BanditEngine
+///     from bandito._engine import BanditEngine
 ///     engine = BanditEngine('{"bandit_id": 1, ...}')
 ///     result_json = engine.pull(query_length=100)
 #[pyclass(name = "BanditEngine")]
@@ -82,7 +82,7 @@ impl PyBanditEngine {
 
 /// Python module entry point.
 #[pymodule]
-fn bandito_engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
+fn _engine(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyBanditEngine>()?;
     Ok(())
 }

@@ -17,7 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
-from bandito_engine import BanditEngine
+from bandito._engine import BanditEngine
 
 from bandito._worker import prepare_cloud_payload
 from bandito.config import DEFAULT_BASE_URL
