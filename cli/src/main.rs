@@ -36,6 +36,13 @@ enum Commands {
     },
     /// Show arm performance leaderboard
     Leaderboard(LeaderboardArgs),
+    /// Install the Python or JavaScript SDK
+    Install {
+        /// SDK to install (python, js)
+        sdk: String,
+    },
+    /// Install Claude Code skill into current project
+    Skill,
     /// Launch the grading workbench TUI
     Tui,
 }
@@ -122,6 +129,8 @@ fn main() -> anyhow::Result<()> {
         Commands::Leaderboard(args) => {
             commands::leaderboard::run(&args.bandit, args.graded, args.watch)?
         }
+        Commands::Install { sdk } => commands::install::run(&sdk)?,
+        Commands::Skill => commands::skill::run()?,
         Commands::Tui => tui::run()?,
     }
 

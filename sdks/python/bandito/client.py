@@ -59,7 +59,7 @@ class BanditoClient:
         client.close()
 
     API key resolution order: constructor arg -> BANDITO_API_KEY env var
-    -> ~/.bandito/config.toml (written by ``bandito init``).
+    -> ~/.bandito/config.toml (written by ``bandito signup``).
 
     ``data_storage`` controls whether query/response text is sent to the
     cloud API. Resolution: constructor arg -> config.toml -> default "local".

@@ -1,7 +1,9 @@
 pub mod arm;
 pub mod config;
 pub mod create;
+pub mod install;
 pub mod leaderboard;
 pub mod list;
 pub mod signup;
+pub mod skill;
 pub mod template;

@@ -43,6 +43,9 @@ bandito tui                       # grade responses interactively
 |---------|-------------|
 | `bandito signup` | Create account + API key + first bandit + SDK snippet (all-in-one) |
 | `bandito config` | Reconfigure an existing account (validates connection) |
+| `bandito install python` | Install the Python SDK (uses uv or pip) |
+| `bandito install js` | Install the JavaScript SDK (uses pnpm, npm, or yarn) |
+| `bandito skill` | Install Claude Code `/bandito` skill into current project |
 
 ### Bandits & Arms
 
@@ -53,7 +56,8 @@ bandito tui                       # grade responses interactively
 | `bandito create` | Create bandit interactively (no file needed) |
 | `bandito list` | Show all bandits |
 | `bandito arm list <bandit>` | Show arms for a bandit |
-| `bandito arm add <bandit> <model> <provider> <prompt>` | Add an arm |
+| `bandito arm add <bandit> <model> <provider> [prompt]` | Add an arm (prompt defaults to "You are a helpful assistant.") |
+| `bandito arm add <bandit> <model> <provider> --prompt-file <file>` | Add an arm with system prompt from file |
 
 ### Monitoring
 
@@ -122,17 +126,15 @@ All Bandito tools share `~/.bandito/config.toml`:
 
 ```toml
 api_key = "bnd_..."
-base_url = "https://bandito-api.onrender.com"
 data_storage = "local"
 ```
 
 | Field | Default | Description |
 |-------|---------|-------------|
 | `api_key` | — | Your API key (created by `bandito signup`) |
-| `base_url` | `https://bandito-api.onrender.com` | Cloud API endpoint |
 | `data_storage` | `"local"` | `"local"` keeps query/response text on your machine; `"cloud"` sends it to the server |
 
-Environment variables `BANDITO_API_KEY`, `BANDITO_BASE_URL`, `BANDITO_DATA_STORAGE` override the config file.
+Environment variables `BANDITO_API_KEY` and `BANDITO_DATA_STORAGE` override the config file.
 
 ## Development
 

@@ -53,6 +53,17 @@ bandito tui                       # grade responses interactively
 bandito leaderboard my-chatbot    # see which arm is winning
 ```
 
+## Claude Code Skill
+
+If you use [Claude Code](https://claude.ai/code), install the Bandito skill into your project:
+
+```bash
+cd your-project
+bandito skill
+```
+
+This gives you a `/bandito` slash command in Claude Code that helps with onboarding, SDK integration, reward function design, and interpreting leaderboard results.
+
 ## Documentation
 
 - [Project Guide](user-guide.md) — repo layout, architecture, how everything fits together

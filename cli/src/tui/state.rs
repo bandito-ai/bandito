@@ -1,4 +1,5 @@
 use anyhow::Result;
+use ratatui::prelude::*;
 use std::collections::HashSet;
 
 use crate::http::HttpClient;
@@ -18,6 +19,13 @@ pub enum Section {
     Prompt,
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum ToastKind {
+    Success,
+    Info,
+    Error,
+}
+
 pub struct App {
     pub screen: Screen,
     pub http: HttpClient,
@@ -32,7 +40,9 @@ pub struct App {
     pub events: Vec<MergedEvent>,
     pub event_index: usize,
     pub skipped: HashSet<String>,
-    pub status_message: Option<(String, u8)>, // (message, remaining_renders)
+
+    // Toast notification
+    toast_message: Option<(String, ToastKind, u8)>, // (message, kind, remaining_renders)
 }
 
 #[derive(Clone)]
@@ -73,33 +83,41 @@ impl App {
             events: Vec::new(),
             event_index: 0,
             skipped: HashSet::new(),
-            status_message: None,
+            toast_message: None,
         }
     }
 
-    pub fn set_status(&mut self, msg: impl Into<String>) {
-        self.status_message = Some((msg.into(), 3)); // show for 3 key presses
+    fn show_toast(&mut self, msg: impl Into<String>, kind: ToastKind) {
+        self.toast_message = Some((msg.into(), kind, 3));
     }
 
     pub fn tick_status(&mut self) {
-        if let Some((_, ref mut remaining)) = self.status_message {
+        if let Some((_, _, ref mut remaining)) = self.toast_message {
             if *remaining == 0 {
-                self.status_message = None;
+                self.toast_message = None;
             } else {
                 *remaining -= 1;
             }
         }
     }
 
-    pub fn status_text(&self) -> Option<&str> {
-        self.status_message.as_ref().map(|(msg, _)| msg.as_str())
+    /// Returns the toast message and its style, if one is active.
+    pub fn toast(&self) -> Option<(&str, Style)> {
+        self.toast_message.as_ref().map(|(msg, kind, _)| {
+            let style = match kind {
+                ToastKind::Success => Style::default().fg(Color::Green).bold(),
+                ToastKind::Info => Style::default().fg(Color::Cyan),
+                ToastKind::Error => Style::default().fg(Color::Red).bold(),
+            };
+            (msg.as_str(), style)
+        })
     }
 
     pub fn load_bandits(&mut self) -> Result<()> {
         match self.load_bandits_inner() {
             Ok(_) => Ok(()),
             Err(e) => {
-                self.set_status(format!("Failed to load bandits: {}", e));
+                self.show_toast(format!("Failed to load bandits: {}", e), ToastKind::Error);
                 Err(e)
             }
         }
@@ -129,7 +147,7 @@ impl App {
         match self.load_events_inner() {
             Ok(_) => {}
             Err(e) => {
-                self.set_status(format!("Failed to load events: {}", e));
+                self.show_toast(format!("Failed to load events: {}", e), ToastKind::Error);
             }
         }
     }
@@ -202,7 +220,10 @@ impl App {
             .sort_by_key(|e| self.skipped.contains(&e.uuid));
 
         self.event_index = 0;
-        self.set_status(format!("{} ungraded events", self.events.len()));
+        self.show_toast(
+            format!("{} ungraded events", self.events.len()),
+            ToastKind::Info,
+        );
         Ok(())
     }
 
@@ -237,14 +258,13 @@ impl App {
                     self.event_index -= 1;
                 }
                 let label = if grade >= 0.5 { "good" } else { "bad" };
-                self.set_status(format!(
-                    "Graded {} ({} remaining)",
-                    label,
-                    self.unskipped_count()
-                ));
+                self.show_toast(
+                    format!("Graded {} ({} remaining)", label, self.unskipped_count()),
+                    ToastKind::Success,
+                );
             }
             Err(e) => {
-                self.set_status(format!("Grade failed: {}", e));
+                self.show_toast(format!("Grade failed: {}", e), ToastKind::Error);
             }
         }
     }
@@ -256,7 +276,7 @@ impl App {
 
         // Don't allow skipping if this is the last unskipped event
         if self.unskipped_count() <= 1 {
-            self.set_status("Can't skip — last unskipped event");
+            self.show_toast("Can't skip — last unskipped event", ToastKind::Error);
             return;
         }
 
@@ -272,7 +292,10 @@ impl App {
         if self.event_index >= unskipped {
             self.event_index = 0;
         }
-        self.set_status(format!("Skipped ({} remaining)", unskipped));
+        self.show_toast(
+            format!("Skipped ({} remaining)", unskipped),
+            ToastKind::Info,
+        );
     }
 
     pub fn copy_section(&mut self, section: Section) {
@@ -290,12 +313,16 @@ impl App {
         match text {
             Some(content) => match arboard::Clipboard::new() {
                 Ok(mut clipboard) => match clipboard.set_text(&content) {
-                    Ok(_) => self.set_status(format!("{} copied", label)),
-                    Err(e) => self.set_status(format!("Copy failed: {}", e)),
+                    Ok(_) => self.show_toast(format!("{} copied", label), ToastKind::Success),
+                    Err(e) => {
+                        self.show_toast(format!("Copy failed: {}", e), ToastKind::Error)
+                    }
                 },
-                Err(e) => self.set_status(format!("Clipboard unavailable: {}", e)),
+                Err(e) => {
+                    self.show_toast(format!("Clipboard unavailable: {}", e), ToastKind::Error)
+                }
             },
-            None => self.set_status(format!("{} not available", label)),
+            None => self.show_toast(format!("{} not available", label), ToastKind::Error),
         }
     }
 }

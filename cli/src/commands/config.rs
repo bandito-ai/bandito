@@ -1,5 +1,5 @@
 use anyhow::{bail, Result};
-use dialoguer::{Input, Password, Select};
+use dialoguer::{Password, Select};
 
 use crate::config::Config;
 use crate::http::HttpClient;
@@ -29,11 +29,8 @@ pub fn run() -> Result<()> {
         .interact()?;
     let data_storage = if storage_idx == 0 { "local" } else { "cloud" };
 
-    // Base URL
-    let base_url: String = Input::new()
-        .with_prompt("Base URL")
-        .default(existing.base_url.clone())
-        .interact_text()?;
+    // Use default base URL (overridable via BANDITO_BASE_URL env var)
+    let base_url = existing.base_url.clone();
 
     // Validate by connecting
     print!("Validating... ");
@@ -49,7 +46,7 @@ pub fn run() -> Result<()> {
         Err(e) => {
             println!("failed.");
             bail!(
-                "Could not connect: {}\nCheck your API key and base URL, then try again.",
+                "Could not connect: {}\nCheck your API key and try again.",
                 e
             );
         }

@@ -17,6 +17,8 @@ bandito/
 ├── sdks/
 │   ├── python/      Python SDK (sync-first, PyO3 bindings to engine)
 │   └── javascript/  JavaScript/TypeScript SDK (WASM bindings to engine)
+├── skills/
+│   └── bandito/     Claude Code skill (onboarding, integration, reward design)
 ├── .github/
 │   └── workflows/   CI for engine, CLI, both SDKs, and release builds
 ├── homebrew-formula/ Homebrew tap formula (for CLI distribution)
@@ -128,11 +130,10 @@ All Bandito tools share `~/.bandito/config.toml`:
 
 ```toml
 api_key = "bnd_..."
-base_url = "https://bandito-api.onrender.com"
 data_storage = "local"
 ```
 
-Created by `bandito signup` (which also creates your first bandit and prints an SDK snippet) or `bandito config`. Environment variables `BANDITO_API_KEY`, `BANDITO_BASE_URL`, `BANDITO_DATA_STORAGE` override the file.
+Created by `bandito signup` (which also creates your first bandit and prints an SDK snippet) or `bandito config`. Environment variables `BANDITO_API_KEY` and `BANDITO_DATA_STORAGE` override the file.
 
 The `data_storage` setting controls privacy: `"local"` (default) keeps query and response text on your machine in SQLite. Only metadata (model, reward, cost, latency, tokens) goes to the cloud. Set `"cloud"` to send full text for cloud-side analytics.
 

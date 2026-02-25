@@ -23,10 +23,7 @@ pub fn render(f: &mut Frame, app: &App, area: Rect) {
             let is_skipped = app.skipped.contains(&event.uuid);
             let prefix = if i == app.event_index { ">" } else { " " };
 
-            let label = format!(
-                "{} {} / {}",
-                prefix, event.model_name, event.model_provider
-            );
+            let label = format!("{} {}", prefix, event.model_name);
 
             let detail = format!(
                 "  {}  r:{}",

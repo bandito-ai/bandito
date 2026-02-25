@@ -53,10 +53,11 @@ impl Config {
         let path = Self::config_path()?;
 
         // Write TOML manually to ensure proper escaping
+        // base_url is intentionally omitted — always uses the default
+        // (overridable via BANDITO_BASE_URL env var for development)
         let contents = format!(
-            "api_key = {}\nbase_url = {}\ndata_storage = {}\n",
+            "api_key = {}\ndata_storage = {}\n",
             escape_toml_value(&self.api_key),
-            escape_toml_value(&self.base_url),
             escape_toml_value(&self.data_storage),
         );
         fs::write(&path, contents)

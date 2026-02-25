@@ -17,6 +17,7 @@ pub(crate) struct BanditSync {
     pub bandit_id: i64,
     pub name: String,
     pub theta: Vec<f64>,
+    #[serde(deserialize_with = "deserialize_flat_or_nested")]
     pub cholesky: Vec<f64>,
     pub dimensions: usize,
     #[serde(default = "default_optimization_mode")]
@@ -25,6 +26,24 @@ pub(crate) struct BanditSync {
     pub avg_latency_last_n: Option<f64>,
     #[serde(default)]
     pub arms: Vec<ArmSync>,
+}
+
+/// Accept either a flat [f64] array or a nested [[f64]] matrix and flatten it.
+fn deserialize_flat_or_nested<'de, D>(deserializer: D) -> Result<Vec<f64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum FlatOrNested {
+        Flat(Vec<f64>),
+        Nested(Vec<Vec<f64>>),
+    }
+
+    match FlatOrNested::deserialize(deserializer)? {
+        FlatOrNested::Flat(v) => Ok(v),
+        FlatOrNested::Nested(rows) => Ok(rows.into_iter().flatten().collect()),
+    }
 }
 
 fn default_optimization_mode() -> String {
@@ -552,6 +571,53 @@ mod tests {
 
         engine.update_from_sync_inner(&new_json).unwrap();
         let result = engine.pull_inner(None, None);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_engine_nested_cholesky() {
+        // Backend sends cholesky as [[f64]] (2D matrix). Engine should flatten it.
+        let dims = 8;
+        let theta = vec![0.0; dims];
+        let mut chol_nested: Vec<Vec<f64>> = vec![vec![0.0; dims]; dims];
+        for i in 0..dims {
+            chol_nested[i][i] = 1.0;
+        }
+
+        let json = serde_json::json!({
+            "bandit_id": 1,
+            "name": "test-nested",
+            "theta": theta,
+            "cholesky": chol_nested,
+            "dimensions": dims,
+            "arms": [
+                {
+                    "arm_id": 1,
+                    "model_name": "gpt-4",
+                    "model_provider": "OpenAI",
+                    "system_prompt": "You are helpful",
+                    "is_active": true
+                },
+                {
+                    "arm_id": 2,
+                    "model_name": "claude-sonnet",
+                    "model_provider": "Anthropic",
+                    "system_prompt": "You are helpful",
+                    "is_active": true
+                },
+                {
+                    "arm_id": 3,
+                    "model_name": "gpt-4",
+                    "model_provider": "OpenAI",
+                    "system_prompt": "Be concise",
+                    "is_active": true
+                }
+            ]
+        })
+        .to_string();
+
+        let mut engine = BanditEngineCore::create(&json, Some(42)).unwrap();
+        let result = engine.pull_inner(Some(100), None);
         assert!(result.is_ok());
     }
 }

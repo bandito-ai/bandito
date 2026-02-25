@@ -23,14 +23,7 @@ pub fn run() -> Result<()> {
         bail!("Password must be at least 8 characters");
     }
 
-    // Load config for base URL (may have been set previously)
-    let existing = Config::load().unwrap_or_default();
-    let base_url = if existing.base_url.is_empty() {
-        Config::default_base_url().to_string()
-    } else {
-        existing.base_url.clone()
-    };
-
+    let base_url = Config::default_base_url().to_string();
     let mut http = HttpClient::with_base_url(&base_url)?;
 
     // 1. Sign up
