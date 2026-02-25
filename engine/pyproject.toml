@@ -1,0 +1,14 @@
+[build-system]
+requires = ["maturin>=1.7"]
+build-backend = "maturin"
+
+[project]
+name = "bandito-engine"
+version = "0.1.0"
+description = "Rust math engine for Bandito contextual bandit optimization"
+requires-python = ">=3.12"
+license = "MIT"
+
+[tool.maturin]
+features = ["python"]
+module-name = "bandito_engine"

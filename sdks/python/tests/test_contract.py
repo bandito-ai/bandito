@@ -1,0 +1,269 @@
+"""Cross-component contract tests: backend SyncResponse → SDK _apply_sync.
+
+Validates that the JSON shape produced by the backend's _build_sync_response()
+is correctly consumed by the SDK's BanditoClient._apply_sync(), with realistic
+learned weights and proper dimension alignment.
+"""
+
+import pytest
+
+from bandito.client import BanditoClient
+from tests.conftest import ARM_DATA, EXPECTED_DIMS, make_sync_response
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+
+def _make_offline_client(seed=42) -> BanditoClient:
+    """Client with no HTTP — we'll call _apply_sync directly."""
+    client = BanditoClient(api_key="bnd_test", base_url="http://unused", _seed=seed)
+    client._connected = True  # bypass connect() check for unit tests
+    return client
+
+
+def _make_identity_chol(d: int) -> list[float]:
+    """Build flattened identity cholesky for d dimensions."""
+    chol = [0.0] * (d * d)
+    for i in range(d):
+        chol[i * d + i] = 1.0
+    return chol
+
+
+def _make_learned_theta(dims: int, favored_model_idx: int) -> list[float]:
+    """Build a theta vector that strongly favors one model.
+
+    Sets a large positive weight on the model one-hot position so that
+    Thompson Sampling consistently picks that arm regardless of noise.
+    """
+    theta = [0.0] * dims
+    theta[favored_model_idx] = 10.0  # overwhelming signal
+    return theta
+
+
+# ── Contract tests ───────────────────────────────────────────────────────────
+
+
+class TestSyncContract:
+    """Prove the backend SyncResponse is correctly consumed by the SDK."""
+
+    def test_nonzero_theta_exploits_learned_arm(self):
+        """With theta that strongly favors one model, pull() consistently picks it.
+
+        Simulates a backend that has learned arm 1 (gpt-4/OpenAI) is best.
+        The SDK should respect those weights after _apply_sync.
+        """
+        # ARM_DATA: arm_id=1 is gpt-4/OpenAI, arm_id=2 is claude-sonnet/Anthropic
+        # ArmIndexMap sorts by arm_id, so model index 0 = (gpt-4, OpenAI)
+        d = EXPECTED_DIMS  # 8
+        theta = _make_learned_theta(d, favored_model_idx=0)
+
+        sync_data = make_sync_response([{
+            "bandit_id": 1, "name": "contract-bot", "type": "online",
+            "cost_importance": 0, "latency_importance": 0,
+            "optimization_mode": "base", "total_pull_count": 100,
+            "avg_latency_last_n": None,
+            "theta": theta,
+            "cholesky": _make_identity_chol(d),
+            "dimensions": d,
+            "arms": [{**a, "is_active": True, "avg_latency_last_n": None} for a in ARM_DATA],
+        }])
+
+        client = _make_offline_client(seed=42)
+        client._apply_sync(sync_data)
+
+        # With theta[0]=10.0 and identity cholesky (noise ~N(0,1)),
+        # arm 1 (gpt-4) should win every time.
+        wins = {"gpt-4": 0, "claude-sonnet": 0}
+        for _ in range(50):
+            result = client.pull("contract-bot")
+            wins[result.arm.model_name] = wins.get(result.arm.model_name, 0) + 1
+
+        assert wins["gpt-4"] == 50, (
+            f"Expected gpt-4 to win all 50 pulls with theta[0]=10.0, "
+            f"but got: {wins}"
+        )
+
+    def test_dimensions_match_arm_layout(self):
+        """Engine dimensions match expected arm layout."""
+        d = EXPECTED_DIMS
+        sync_data = make_sync_response()
+
+        client = _make_offline_client()
+        client._apply_sync(sync_data)
+
+        engine = client._engines["my-chatbot"]
+
+        # Engine dimensions must match wire dimensions
+        assert engine.dimensions == d
+        assert engine.num_arms == len(ARM_DATA)
+
+    def test_cholesky_identity_gives_uniform_exploration(self):
+        """With zero theta and identity cholesky, no arm is systematically favored.
+
+        Pure exploration: all arms should get selected at least once over many pulls.
+        """
+        d = EXPECTED_DIMS
+        sync_data = make_sync_response([{
+            "bandit_id": 1, "name": "explore-bot", "type": "online",
+            "cost_importance": 0, "latency_importance": 0,
+            "optimization_mode": "base", "total_pull_count": 0,
+            "avg_latency_last_n": None,
+            "theta": [0.0] * d,
+            "cholesky": _make_identity_chol(d),
+            "dimensions": d,
+            "arms": [{**a, "is_active": True, "avg_latency_last_n": None} for a in ARM_DATA],
+        }])
+
+        client = _make_offline_client(seed=123)
+        client._apply_sync(sync_data)
+
+        arm_ids_seen = set()
+        for _ in range(200):
+            result = client.pull("explore-bot")
+            arm_ids_seen.add(result.arm.arm_id)
+
+        assert arm_ids_seen == {1, 2, 3}, (
+            f"Expected all 3 arms to be selected at least once with zero theta, "
+            f"but only saw arm_ids {arm_ids_seen}"
+        )
+
+    def test_response_field_coverage(self):
+        """Every field _apply_sync reads exists in the mock sync response.
+
+        Catches schema drift: if the backend adds/renames a field that the SDK
+        depends on, this test will fail with a KeyError during _apply_sync.
+        """
+        sync_data = make_sync_response()
+
+        # Verify top-level keys
+        assert "bandits" in sync_data
+        assert "server_time" in sync_data
+
+        bandit = sync_data["bandits"][0]
+
+        # Keys read by _apply_sync for each bandit
+        required_bandit_keys = {
+            "bandit_id", "name", "theta", "cholesky", "dimensions",
+            "optimization_mode", "avg_latency_last_n", "arms",
+        }
+        assert required_bandit_keys.issubset(bandit.keys()), (
+            f"Missing bandit keys: {required_bandit_keys - bandit.keys()}"
+        )
+
+        arm = bandit["arms"][0]
+
+        # Keys read by _apply_sync for each arm
+        required_arm_keys = {
+            "arm_id", "model_name", "model_provider",
+            "system_prompt", "is_prompt_templated", "avg_latency_last_n",
+        }
+        assert required_arm_keys.issubset(arm.keys()), (
+            f"Missing arm keys: {required_arm_keys - arm.keys()}"
+        )
+
+        # Verify _apply_sync actually succeeds without error
+        client = _make_offline_client()
+        client._apply_sync(sync_data)
+        assert "my-chatbot" in client._bandits
+
+    def test_optional_fields_missing_resilience(self):
+        """_apply_sync handles sync responses missing optional fields.
+
+        Fields like budget, total_cost, avg_latency_last_n, and
+        optimization_mode may be absent from the server response.
+        The SDK should apply sensible defaults without error.
+        """
+        d = EXPECTED_DIMS
+        # Minimal bandit — only required fields, no optional ones
+        minimal_bandit = {
+            "bandit_id": 1,
+            "name": "minimal-bot",
+            "theta": [0.0] * d,
+            "cholesky": _make_identity_chol(d),
+            "dimensions": d,
+            "arms": [{
+                "arm_id": a["arm_id"],
+                "model_name": a["model_name"],
+                "model_provider": a["model_provider"],
+                "system_prompt": a["system_prompt"],
+                "is_prompt_templated": a["is_prompt_templated"],
+            } for a in ARM_DATA],
+            # Intentionally omitted: budget, total_cost, avg_latency_last_n,
+            # optimization_mode, type, cost_importance, latency_importance,
+            # total_pull_count
+        }
+        sync_data = {"bandits": [minimal_bandit], "server_time": "2025-01-01T00:00:00Z"}
+
+        client = _make_offline_client()
+        client._apply_sync(sync_data)
+
+        cache = client._bandits["minimal-bot"]
+        assert cache.optimization_mode == "base"  # default
+        assert cache.budget is None
+        assert cache.total_cost is None
+        assert cache.avg_latency_last_n is None
+        assert len(cache.arms) == len(ARM_DATA)
+
+        # Should be able to pull without error
+        result = client.pull("minimal-bot")
+        assert result.arm is not None
+
+    def test_engine_dimensions_match(self):
+        """Engine dimensions match expected formula (3*n_models + n_prompts)."""
+        d = EXPECTED_DIMS
+        sync_data = make_sync_response()
+
+        client = _make_offline_client()
+        client._apply_sync(sync_data)
+
+        engine = client._engines["my-chatbot"]
+        # 2 models, 2 prompts → 3*2 + 2 = 8
+        assert engine.dimensions == d
+
+    def test_inactive_arm_dimensions_match(self):
+        """When an arm is deactivated, dimensions still match theta/chol.
+
+        Backend computes dimensions from ALL arms (active + inactive).
+        Sync sends all arms with is_active flag. SDK must use all arms
+        for dimension computation so feature matrix @ theta doesn't fail.
+        """
+        d = EXPECTED_DIMS  # 8 = 3*2 + 2 (2 models, 2 prompts)
+        # Deactivate arm 2 (claude-sonnet/Anthropic) — still has 2 models/2 prompts
+        arms_with_inactive = [
+            {**ARM_DATA[0], "is_active": True, "avg_latency_last_n": None},
+            {**ARM_DATA[1], "is_active": False, "avg_latency_last_n": None},
+            {**ARM_DATA[2], "is_active": True, "avg_latency_last_n": None},
+        ]
+        sync_data = make_sync_response([{
+            "bandit_id": 1, "name": "inactive-bot", "type": "online",
+            "cost_importance": 0, "latency_importance": 0,
+            "optimization_mode": "base", "total_pull_count": 100,
+            "avg_latency_last_n": None,
+            "theta": [0.0] * d,
+            "cholesky": _make_identity_chol(d),
+            "dimensions": d,
+            "arms": arms_with_inactive,
+        }])
+
+        client = _make_offline_client(seed=42)
+        client._apply_sync(sync_data)
+
+        engine = client._engines["inactive-bot"]
+
+        # Dimensions must match backend's theta length
+        assert engine.dimensions == d
+        assert engine.num_arms == 3  # all 3 arms in engine
+
+        # Only 2 active arms exposed to user
+        cache = client._bandits["inactive-bot"]
+        assert len(cache.arms) == 2
+        active_ids = {a.arm_id for a in cache.arms}
+        assert active_ids == {1, 3}
+
+        # pull() should work and never select the inactive arm
+        selected_ids = set()
+        for _ in range(100):
+            result = client.pull("inactive-bot")
+            selected_ids.add(result.arm.arm_id)
+        assert 2 not in selected_ids, "Inactive arm should never be selected"
+        assert selected_ids.issubset({1, 3})

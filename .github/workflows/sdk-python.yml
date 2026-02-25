@@ -1,0 +1,35 @@
+name: SDK (Python)
+
+on:
+  push:
+    paths:
+      - "sdks/python/**"
+      - "engine/**"
+      - ".github/workflows/sdk-python.yml"
+  pull_request:
+    paths:
+      - "sdks/python/**"
+      - "engine/**"
+      - ".github/workflows/sdk-python.yml"
+
+jobs:
+  test:
+    name: Python SDK tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v5
+
+      # Build and install Rust engine into SDK venv
+      - name: Install maturin and build engine
+        run: |
+          uv tool install maturin
+          cd engine && VIRTUAL_ENV=../sdks/python/.venv maturin develop --features python --uv
+
+      # Install SDK deps and run tests
+      - name: Install and test
+        working-directory: sdks/python
+        run: |
+          uv sync
+          uv run pytest tests/ -q

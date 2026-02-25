@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.venv
+*.log
+scratch/
+*.db
+*.sqlite3
+.pytest_cache/
+
+# Rust
+target/
+engine/pkg/
+
+# JavaScript
+node_modules/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# uv
+uv.lock

@@ -1,0 +1,28 @@
+name: CLI (Rust)
+
+on:
+  push:
+    paths:
+      - "cli/**"
+      - "engine/**"
+      - "Cargo.toml"
+      - ".github/workflows/cli.yml"
+  pull_request:
+    paths:
+      - "cli/**"
+      - "engine/**"
+      - "Cargo.toml"
+      - ".github/workflows/cli.yml"
+
+jobs:
+  build:
+    name: Build CLI
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build -p bandito-cli
+      - run: cargo test -p bandito-cli
