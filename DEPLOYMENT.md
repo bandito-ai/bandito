@@ -8,7 +8,7 @@ How to release the CLI, publish the SDKs, and set up the Homebrew tap.
 |-----------|---------------------|---------|
 | CLI binary | GitHub Releases + Homebrew | Git tag `v*` |
 | Python SDK | PyPI | Git tag `v*` (automated) |
-| JS SDK | npm | Manual (future: tag-triggered) |
+| JS SDK | npm | Git tag `v*` (automated) |
 | Rust engine | Not published standalone | Consumed internally by CLI + SDKs |
 
 ## CLI Release
@@ -116,25 +116,24 @@ version = "0.1.0"  # bump this
 
 ## JavaScript SDK (npm)
 
-### Prerequisites
+Publishing is fully automated via the `publish-javascript.yml` workflow, which triggers on any `v*` tag push.
 
-- npm account with publish access to `bandito` package
-- WASM engine built
+### What the workflow does
 
-### Build WASM engine
+1. Builds WASM engine (`wasm-pack build`)
+2. Builds SDK (`pnpm build` via tsup → CJS + ESM)
+3. Publishes to npm using `NPM_TOKEN` secret
+
+### First-time setup
+
+1. Create an npm access token: `npm token create` (or npmjs.com → Access Tokens → Generate)
+2. Add it as `NPM_TOKEN` in GitHub repo secrets
+
+### Building locally
 
 ```bash
-cd engine
-wasm-pack build --target nodejs --out-dir pkg --features wasm
-```
-
-### Build and publish
-
-```bash
-cd sdks/javascript
-pnpm install
-pnpm build          # CJS + ESM via tsup
-pnpm publish        # or: npm publish
+cd engine && wasm-pack build --target nodejs --out-dir pkg --features wasm
+cd ../sdks/javascript && pnpm install && pnpm build
 ```
 
 ### Version bumping
@@ -159,6 +158,7 @@ All workflows live in `.github/workflows/`:
 | `sdk-javascript.yml` | Push to `sdks/javascript/` or `engine/` | Build WASM, run vitest |
 | `release.yml` | Tag `v*` | Build CLI binaries for 4 platforms, create GitHub Release |
 | `publish-python.yml` | Tag `v*` | Build Python wheels for 5 platforms, publish to PyPI |
+| `publish-javascript.yml` | Tag `v*` | Build WASM + SDK, publish to npm |
 
 ## Version Strategy
 
@@ -229,17 +229,14 @@ shasum -a 256 bandito-*.tar.gz
 
 Update hashes in `homebrew-formula/bandito.rb`, commit, and push to `bandito-ai/homebrew-tap`.
 
-### 6. Publish JS SDK (manual)
+### 6. Verify JS SDK
 
-```bash
-cd sdks/javascript
-pnpm build
-pnpm publish
-```
+Check `https://www.npmjs.com/package/bandito` for the new version.
 
 ### Gotchas
 
 - **PyPI versions are permanent.** You can't re-upload the same version. If a publish partially fails, bump the version.
 - **`macos-latest`** is ARM (Apple Silicon). x86_64 macOS builds cross-compile on the same runner.
 - **PyPI auth** uses `PYPI_API_TOKEN` GitHub secret (not trusted publisher).
+- **npm auth** uses `NPM_TOKEN` GitHub secret.
 - **Cargo.lock** will update when you bump `engine/Cargo.toml` — make sure to include it in the commit.

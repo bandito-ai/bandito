@@ -1,0 +1,46 @@
+name: Publish JavaScript SDK
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  publish:
+    name: Build and publish to npm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: sdks/javascript/pnpm-lock.yaml
+          registry-url: https://registry.npmjs.org
+
+      - name: Build WASM engine
+        working-directory: engine
+        run: |
+          cargo install wasm-pack
+          wasm-pack build --target nodejs --out-dir pkg --features wasm
+
+      - name: Install and build
+        working-directory: sdks/javascript
+        run: |
+          pnpm install
+          pnpm build
+
+      - name: Publish to npm
+        working-directory: sdks/javascript
+        run: pnpm publish --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
