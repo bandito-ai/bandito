@@ -173,11 +173,73 @@ Bump all of these before tagging a release.
 
 ## Checklist: Cutting a Release
 
-1. Update version in all 5 files listed above
-2. Commit: `git commit -m "Bump version to 0.2.0"`
-3. Tag: `git tag v0.2.0`
-4. Push: `git push origin main v0.2.0`
-5. Wait for `release.yml` to complete — verify 4 binaries on GitHub Releases
-6. Wait for `publish-python.yml` to complete — verify new version on [PyPI](https://pypi.org/project/bandito/)
-7. Update Homebrew formula with new version + SHA256 hashes
-8. Publish JS SDK to npm: `cd sdks/javascript && pnpm build && pnpm publish`
+Example below uses `0.2.0` — replace with your version.
+
+### 1. Bump version in all 5 files
+
+```bash
+# engine/Cargo.toml        → version = "0.2.0"
+# cli/Cargo.toml            → version = "0.2.0"
+# sdks/python/pyproject.toml → version = "0.2.0"
+# sdks/javascript/package.json → "version": "0.2.0"
+# homebrew-formula/bandito.rb → version "0.2.0"
+```
+
+### 2. Commit, tag, push
+
+```bash
+git add engine/Cargo.toml cli/Cargo.toml sdks/python/pyproject.toml sdks/javascript/package.json homebrew-formula/bandito.rb
+git commit -m "v0.2.0"
+git tag v0.2.0
+git push origin main v0.2.0
+```
+
+### 3. Wait for CI (5-10 min)
+
+Two workflows trigger automatically on the `v*` tag:
+
+- `release.yml` → builds CLI binaries for 4 platforms, creates GitHub Release
+- `publish-python.yml` → builds Python wheels for 5 platforms, publishes to PyPI
+
+Check status:
+
+```bash
+gh run list --limit 6
+```
+
+### 4. Verify
+
+- GitHub Releases: `https://github.com/bandito-ai/bandito/releases`  — 4 binaries attached
+- PyPI: `https://pypi.org/project/bandito/` — new version visible
+- Quick test: `pip install bandito==0.2.0`
+
+### 5. Update Homebrew formula
+
+Download the macOS release archives and compute SHA256 hashes:
+
+```bash
+# Download from GitHub Releases
+curl -LO https://github.com/bandito-ai/bandito/releases/download/v0.2.0/bandito-aarch64-apple-darwin.tar.gz
+curl -LO https://github.com/bandito-ai/bandito/releases/download/v0.2.0/bandito-x86_64-apple-darwin.tar.gz
+curl -LO https://github.com/bandito-ai/bandito/releases/download/v0.2.0/bandito-x86_64-unknown-linux-gnu.tar.gz
+
+# Compute hashes
+shasum -a 256 bandito-*.tar.gz
+```
+
+Update hashes in `homebrew-formula/bandito.rb`, commit, and push to `bandito-ai/homebrew-tap`.
+
+### 6. Publish JS SDK (manual)
+
+```bash
+cd sdks/javascript
+pnpm build
+pnpm publish
+```
+
+### Gotchas
+
+- **PyPI versions are permanent.** You can't re-upload the same version. If a publish partially fails, bump the version.
+- **`macos-latest`** is ARM (Apple Silicon). x86_64 macOS builds cross-compile on the same runner.
+- **PyPI auth** uses `PYPI_API_TOKEN` GitHub secret (not trusted publisher).
+- **Cargo.lock** will update when you bump `engine/Cargo.toml` — make sure to include it in the commit.
