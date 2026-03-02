@@ -7,7 +7,7 @@ How to release the CLI, publish the SDKs, and set up the Homebrew tap.
 | Component | Distribution Channel | Trigger |
 |-----------|---------------------|---------|
 | CLI binary | GitHub Releases + Homebrew | Git tag `v*` |
-| Python SDK | PyPI | Manual (future: tag-triggered) |
+| Python SDK | PyPI | Git tag `v*` (automated) |
 | JS SDK | npm | Manual (future: tag-triggered) |
 | Rust engine | Not published standalone | Consumed internally by CLI + SDKs |
 
@@ -85,32 +85,35 @@ brew install bandito-ai/tap/bandito
 
 ## Python SDK (PyPI)
 
-### Prerequisites
+The Python SDK uses maturin as its build backend. The Rust engine is compiled into the package automatically — there is no separate `bandito-engine` wheel.
 
-- PyPI account with API token
-- `twine` or `uv publish` configured
+Publishing is fully automated via the `publish-python.yml` workflow, which triggers on any `v*` tag push (same trigger as the CLI release).
 
-### Build the engine wheel
+### What the workflow does
 
-The Python SDK depends on `bandito-engine`, which must be built as a platform-specific wheel via maturin.
+1. Builds platform-specific wheels using `PyO3/maturin-action` for 5 targets:
+   - Linux x86_64 + aarch64 (via `manylinux`)
+   - macOS x86_64 (Intel) + aarch64 (Apple Silicon)
+   - Windows x86_64
+2. Builds a source distribution (`sdist`) for fallback/editable installs
+3. Publishes all wheels + sdist to PyPI using trusted publisher (OIDC)
 
-```bash
-cd engine
-maturin build --release --features python -o dist
-```
+### First-time setup (manual)
 
-This produces a `.whl` file in `engine/dist/`. For multi-platform distribution, build on each target OS (or use the `engine.yml` CI workflow which builds wheels for ubuntu and macOS).
+Before the first publish, you must:
 
-### Build and publish the SDK
+1. Register the `bandito` package on [PyPI](https://pypi.org)
+2. Configure trusted publisher on PyPI: Settings → Publishing → Add GitHub Actions publisher:
+   - Repository: `bandito-ai/bandito`
+   - Workflow: `publish-python.yml`
+   - Environment: `pypi`
+3. Create a `pypi` environment in GitHub repo settings (recommended for approval gates)
+
+### Building locally
 
 ```bash
 cd sdks/python
-
-# Build the SDK package
-python -m build
-
-# Upload to PyPI
-twine upload dist/*
+maturin build --release    # builds .whl with embedded Rust extension
 ```
 
 ### Version bumping
@@ -121,12 +124,6 @@ Update the version in `sdks/python/pyproject.toml`:
 [project]
 version = "0.1.0"  # bump this
 ```
-
-The `bandito-engine` dependency version in `pyproject.toml` should match the engine version in `engine/Cargo.toml`.
-
-### CI: Engine wheels
-
-The `engine.yml` workflow already builds Python wheels on push to `engine/` and uploads them as artifacts. These can be downloaded from the workflow run for testing or manual PyPI upload.
 
 ## JavaScript SDK (npm)
 
@@ -167,11 +164,12 @@ All workflows live in `.github/workflows/`:
 
 | Workflow | Triggers on | What it does |
 |----------|------------|-------------|
-| `engine.yml` | Push to `engine/` | Rust tests, WASM build, Python wheel builds (ubuntu + macOS) |
+| `engine.yml` | Push to `engine/` | Rust tests, WASM build |
 | `cli.yml` | Push to `cli/` or `engine/` | Build + test CLI on ubuntu + macOS |
-| `sdk-python.yml` | Push to `sdks/python/` or `engine/` | Build engine via maturin, run pytest |
+| `sdk-python.yml` | Push to `sdks/python/` or `engine/` | `uv sync` (builds Rust engine via maturin), run pytest |
 | `sdk-javascript.yml` | Push to `sdks/javascript/` or `engine/` | Build WASM, run vitest |
 | `release.yml` | Tag `v*` | Build CLI binaries for 4 platforms, create GitHub Release |
+| `publish-python.yml` | Tag `v*` | Build Python wheels for 5 platforms, publish to PyPI |
 
 ## Version Strategy
 
@@ -191,6 +189,6 @@ Bump all of these before tagging a release.
 3. Tag: `git tag v0.2.0`
 4. Push: `git push origin main v0.2.0`
 5. Wait for `release.yml` to complete — verify 4 binaries on GitHub Releases
-6. Update Homebrew formula with new version + SHA256 hashes
-7. Publish Python SDK to PyPI: `cd sdks/python && python -m build && twine upload dist/*`
+6. Wait for `publish-python.yml` to complete — verify new version on [PyPI](https://pypi.org/project/bandito/)
+7. Update Homebrew formula with new version + SHA256 hashes
 8. Publish JS SDK to npm: `cd sdks/javascript && pnpm build && pnpm publish`

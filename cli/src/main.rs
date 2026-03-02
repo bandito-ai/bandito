@@ -41,7 +41,7 @@ enum Commands {
         /// SDK to install (python, js)
         sdk: String,
     },
-    /// Install Claude Code skill into current project
+    /// Install AI coding tool skill into current project
     Skill,
     /// Launch the grading workbench TUI
     Tui,

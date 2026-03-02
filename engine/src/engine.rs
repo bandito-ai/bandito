@@ -575,6 +575,186 @@ mod tests {
     }
 
     #[test]
+    fn test_engine_pull_diversity() {
+        // With fresh state (theta=0, chol=I), repeated pulls should explore
+        // all arms, not always pick the same one.
+        let json = make_bandit_json();
+        let mut engine = BanditEngineCore::create(&json, Some(42)).unwrap();
+
+        let mut arm_counts: HashMap<i64, usize> = HashMap::new();
+        let n_pulls = 20;
+        for _ in 0..n_pulls {
+            let result_json = engine.pull_inner(Some(50), None).unwrap();
+            let result: PullOutput = serde_json::from_str(&result_json).unwrap();
+            *arm_counts.entry(result.arm_id).or_insert(0) += 1;
+        }
+
+        // With 3 arms and 20 pulls from a uniform prior, each arm should
+        // appear at least once (probability of missing one is vanishingly small).
+        eprintln!("Arm selection counts: {:?}", arm_counts);
+        assert!(
+            arm_counts.len() >= 2,
+            "Expected at least 2 different arms in {} pulls, got {:?}",
+            n_pulls,
+            arm_counts
+        );
+    }
+
+    #[test]
+    fn test_feature_matrix_row_order_matches_identities() {
+        // Verify that feature matrix rows correspond to arm_identities order,
+        // not some other ordering.
+        let json = make_bandit_json();
+        let engine = BanditEngineCore::create(&json, Some(42)).unwrap();
+
+        let d = engine.dimensions;
+        let m = &engine.index_map;
+
+        for (i, identity) in engine.arm_identities.iter().enumerate() {
+            let model_idx = m
+                .model_index(&identity.model_name, &identity.model_provider)
+                .unwrap();
+            let prompt_idx = m.prompt_index(&identity.system_prompt).unwrap();
+
+            // Row i should have model_idx bit set in block 1
+            assert_eq!(
+                engine.feature_matrix[i * d + model_idx],
+                1.0,
+                "Row {} (arm_id={}) should have model one-hot at index {}, but doesn't",
+                i,
+                identity.arm_id,
+                model_idx,
+            );
+
+            // Row i should have prompt_idx bit set in block 2
+            assert_eq!(
+                engine.feature_matrix[i * d + m.n_models + prompt_idx],
+                1.0,
+                "Row {} (arm_id={}) should have prompt one-hot at index {}, but doesn't",
+                i,
+                identity.arm_id,
+                m.n_models + prompt_idx,
+            );
+        }
+    }
+
+    #[test]
+    fn test_feature_matrix_unsorted_arms() {
+        // Arms arrive in non-sorted order (arm_id=3 first).
+        // Feature matrix rows should still match arm_identities order.
+        let dims = 8;
+        let theta = vec![0.0; dims];
+        let mut chol = vec![0.0; dims * dims];
+        for i in 0..dims {
+            chol[i * dims + i] = 1.0;
+        }
+
+        let json = serde_json::json!({
+            "bandit_id": 1,
+            "name": "test-unsorted",
+            "theta": theta,
+            "cholesky": chol,
+            "dimensions": dims,
+            "arms": [
+                {
+                    "arm_id": 3,
+                    "model_name": "gpt-4",
+                    "model_provider": "OpenAI",
+                    "system_prompt": "Be concise",
+                    "is_active": true
+                },
+                {
+                    "arm_id": 1,
+                    "model_name": "gpt-4",
+                    "model_provider": "OpenAI",
+                    "system_prompt": "You are helpful",
+                    "is_active": true
+                },
+                {
+                    "arm_id": 2,
+                    "model_name": "claude-sonnet",
+                    "model_provider": "Anthropic",
+                    "system_prompt": "You are helpful",
+                    "is_active": true
+                }
+            ]
+        })
+        .to_string();
+
+        let engine = BanditEngineCore::create(&json, Some(42)).unwrap();
+
+        // arm_identities should be in the order from JSON: [3, 1, 2]
+        assert_eq!(engine.arm_identities[0].arm_id, 3);
+        assert_eq!(engine.arm_identities[1].arm_id, 1);
+        assert_eq!(engine.arm_identities[2].arm_id, 2);
+
+        let d = engine.dimensions;
+        let m = &engine.index_map;
+
+        // Verify each row's one-hot matches the correct arm identity
+        for (i, identity) in engine.arm_identities.iter().enumerate() {
+            let model_idx = m
+                .model_index(&identity.model_name, &identity.model_provider)
+                .unwrap();
+
+            assert_eq!(
+                engine.feature_matrix[i * d + model_idx],
+                1.0,
+                "Row {} (arm_id={}) should have model one-hot at {}, feature row: {:?}",
+                i,
+                identity.arm_id,
+                model_idx,
+                &engine.feature_matrix[i * d..(i + 1) * d],
+            );
+        }
+    }
+
+    #[test]
+    fn test_pull_diversity_survives_recreate() {
+        // Simulates what Python SDK sync() does: recreate engine from same JSON.
+        // The deterministic seed means each recreation resets the RNG,
+        // so the same sequence of pulls repeats.
+        let json = make_bandit_json();
+
+        let mut results = Vec::new();
+        for _ in 0..5 {
+            // Recreate engine (no explicit seed → deterministic from name+id)
+            let mut engine = BanditEngineCore::create(&json, None).unwrap();
+            let result_json = engine.pull_inner(Some(50), None).unwrap();
+            let result: PullOutput = serde_json::from_str(&result_json).unwrap();
+            results.push(result.arm_id);
+        }
+
+        eprintln!("Arms after recreate-then-pull: {:?}", results);
+        // All 5 should be identical — recreating with same seed resets RNG
+        let unique: HashSet<i64> = results.iter().cloned().collect();
+        assert_eq!(
+            unique.len(), 1,
+            "Recreating engine from same JSON with deterministic seed should always \
+             pick the same arm on first pull (RNG resets). Got: {:?}",
+            results,
+        );
+
+        // Now verify that update_from_sync preserves diversity
+        let mut engine = BanditEngineCore::create(&json, None).unwrap();
+        let mut results_with_update = Vec::new();
+        for _ in 0..5 {
+            let result_json = engine.pull_inner(Some(50), None).unwrap();
+            let result: PullOutput = serde_json::from_str(&result_json).unwrap();
+            results_with_update.push(result.arm_id);
+            // Simulate sync — update_from_sync preserves RNG
+            engine.update_from_sync_inner(&json).unwrap();
+        }
+        eprintln!("Arms after update_from_sync: {:?}", results_with_update);
+        let unique_with_update: HashSet<i64> = results_with_update.iter().cloned().collect();
+        assert!(
+            unique_with_update.len() >= 2,
+            "update_from_sync should preserve RNG state, giving diverse pulls. Got: {:?}",
+            results_with_update,
+        );
+    }
+
+    #[test]
     fn test_engine_nested_cholesky() {
         // Backend sends cholesky as [[f64]] (2D matrix). Engine should flatten it.
         let dims = 8;

@@ -391,8 +391,9 @@ class BanditoClient:
 
     def _apply_sync_inner(self, data: dict[str, Any]) -> None:
         """Inner implementation of sync response parsing."""
-        self._bandits.clear()
-        self._engines.clear()
+        new_bandits: dict[str, _BanditCache] = {}
+        new_engines: dict[str, BanditEngine] = {}
+        seen_names: set[str] = set()
 
         for b in data.get("bandits", []):
             arms_data = b.get("arms", [])
@@ -411,13 +412,19 @@ class BanditoClient:
                         is_prompt_templated=a["is_prompt_templated"],
                     ))
 
-            # Create Rust engine from sync JSON for this bandit
-            bandit_json = json.dumps(b)
-            engine = BanditEngine(bandit_json, self._seed)
             name = b["name"]
-            self._engines[name] = engine
+            seen_names.add(name)
+            bandit_json = json.dumps(b)
 
-            self._bandits[name] = _BanditCache(
+            # Reuse existing engine (preserves RNG state) or create new one
+            existing_engine = self._engines.get(name)
+            if existing_engine is not None:
+                existing_engine.update_from_sync(bandit_json)
+                new_engines[name] = existing_engine
+            else:
+                new_engines[name] = BanditEngine(bandit_json, self._seed)
+
+            new_bandits[name] = _BanditCache(
                 bandit_id=b["bandit_id"],
                 name=name,
                 arms=active_arms,
@@ -426,6 +433,9 @@ class BanditoClient:
                 budget=b.get("budget"),
                 total_cost=b.get("total_cost"),
             )
+
+        self._bandits = new_bandits
+        self._engines = new_engines
 
         for name, cache in self._bandits.items():
             self._check_budget(name, cache)

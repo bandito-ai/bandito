@@ -29,6 +29,14 @@ export function createEngine(banditJson: string): WasmBanditEngine {
   return new wasmModule.BanditEngine(banditJson);
 }
 
+/**
+ * Update an existing BanditEngine with new sync response data.
+ * Preserves RNG state (avoids the "always picks same arm" bug).
+ */
+export function updateEngine(engine: WasmBanditEngine, banditJson: string): void {
+  engine.updateFromSync(banditJson);
+}
+
 export type { WasmBanditEngine as BanditEngine };
 
 /**

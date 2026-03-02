@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      - run: cargo test -p bandito-engine
+      - run: cargo test
 
   wasm-build:
     name: WASM build
@@ -36,23 +36,3 @@ jobs:
       - run: cargo install wasm-pack
       - run: wasm-pack build --target nodejs --out-dir pkg --features wasm
 
-  python-wheels:
-    name: Python wheels (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    defaults:
-      run:
-        working-directory: engine
-    steps:
-      - uses: actions/checkout@v4
-      - uses: PyO3/maturin-action@v1
-        with:
-          command: build
-          args: --release --features python -o dist
-          working-directory: engine
-      - uses: actions/upload-artifact@v4
-        with:
-          name: wheels-${{ matrix.os }}
-          path: engine/dist/*.whl

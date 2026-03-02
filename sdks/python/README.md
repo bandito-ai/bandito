@@ -160,10 +160,7 @@ Environment variables `BANDITO_API_KEY`, `BANDITO_BASE_URL`, `BANDITO_DATA_STORA
 ## Development
 
 ```bash
-# Build Rust engine into SDK venv
-cd engine && VIRTUAL_ENV=../sdks/python/.venv maturin develop --features python --uv
-
-# Install and test
-cd sdks/python && uv sync
+cd sdks/python
+uv sync            # builds Rust engine + installs SDK
 uv run pytest -q   # 95 tests
 ```

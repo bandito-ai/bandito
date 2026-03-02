@@ -1,4 +1,4 @@
-"""Tests for the Rust engine PyO3 bindings (bandito_engine)."""
+"""Tests for the Rust engine PyO3 bindings (bandito._engine)."""
 
 import json
 

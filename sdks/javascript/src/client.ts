@@ -13,7 +13,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { performance } from "node:perf_hooks";
 
-import { initWasm, createEngine, type BanditEngine, type EnginePullResult } from "./engine.js";
+import { initWasm, createEngine, updateEngine, type BanditEngine, type EnginePullResult } from "./engine.js";
 import {
   type Arm,
   type PullResult,
@@ -314,8 +314,8 @@ export class BanditoClient {
   private applySync(data: Record<string, unknown>): void {
     const banditsData = (data.bandits ?? []) as Record<string, unknown>[];
 
-    this.bandits.clear();
-    this.engines.clear();
+    const newBandits = new Map<string, BanditCache>();
+    const newEngines = new Map<string, BanditEngine>();
 
     for (const b of banditsData) {
       const arms = (b.arms ?? []) as ArmWire[];
@@ -325,9 +325,10 @@ export class BanditoClient {
         .filter((a) => a.is_active)
         .map((a) => createArm(a));
 
+      const name = b.name as string;
       const cache: BanditCache = {
         banditId: Number(b.bandit_id),
-        name: b.name as string,
+        name,
         arms: activeArms,
         armWire: arms,
         optimizationMode: (b.optimization_mode as string) ?? "base",
@@ -336,12 +337,21 @@ export class BanditoClient {
         totalCost: b.total_cost as number | null,
       };
 
-      this.bandits.set(cache.name, cache);
+      newBandits.set(name, cache);
 
-      // Create WASM engine from the bandit JSON
-      const engine = createEngine(JSON.stringify(b));
-      this.engines.set(cache.name, engine);
+      // Reuse existing engine (preserves RNG state) or create new one
+      const existingEngine = this.engines.get(name);
+      const banditJson = JSON.stringify(b);
+      if (existingEngine) {
+        updateEngine(existingEngine, banditJson);
+        newEngines.set(name, existingEngine);
+      } else {
+        newEngines.set(name, createEngine(banditJson));
+      }
     }
+
+    this.bandits = newBandits;
+    this.engines = newEngines;
   }
 
   private async flushPending(): Promise<void> {

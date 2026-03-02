@@ -103,12 +103,10 @@ pub fn build_feature_matrix(arms: &[ArmIdentity], index_map: &ArmIndexMap) -> Ve
     let dims = index_map.dimensions;
     let mut matrix = vec![0.0f64; n_arms * dims];
 
-    // Sort arms by arm_id for consistent ordering
-    let mut sorted_indices: Vec<usize> = (0..n_arms).collect();
-    sorted_indices.sort_by_key(|&i| arms[i].arm_id);
-
-    for (row, &orig_idx) in sorted_indices.iter().enumerate() {
-        let arm = &arms[orig_idx];
+    // Iterate arms in their given order so that matrix row i corresponds
+    // to arm_identities[i]. The ArmIndexMap handles deterministic model/prompt
+    // index assignment via its own sort — row order is separate.
+    for (row, arm) in arms.iter().enumerate() {
         let model_idx = index_map
             .model_index(&arm.model_name, &arm.model_provider)
             .expect("arm model not in index map");
