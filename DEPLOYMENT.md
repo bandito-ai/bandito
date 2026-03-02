@@ -96,18 +96,7 @@ Publishing is fully automated via the `publish-python.yml` workflow, which trigg
    - macOS x86_64 (Intel) + aarch64 (Apple Silicon)
    - Windows x86_64
 2. Builds a source distribution (`sdist`) for fallback/editable installs
-3. Publishes all wheels + sdist to PyPI using trusted publisher (OIDC)
-
-### First-time setup (manual)
-
-Before the first publish, you must:
-
-1. Register the `bandito` package on [PyPI](https://pypi.org)
-2. Configure trusted publisher on PyPI: Settings → Publishing → Add GitHub Actions publisher:
-   - Repository: `bandito-ai/bandito`
-   - Workflow: `publish-python.yml`
-   - Environment: `pypi`
-3. Create a `pypi` environment in GitHub repo settings (recommended for approval gates)
+3. Publishes all wheels + sdist to PyPI using API token (`PYPI_API_TOKEN` secret)
 
 ### Building locally
 

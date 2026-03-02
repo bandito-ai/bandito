@@ -16,9 +16,9 @@ jobs:
             target: x86_64
           - os: ubuntu-latest
             target: aarch64
-          - os: macos-13
+          - os: macos-latest
             target: x86_64
-          - os: macos-14
+          - os: macos-latest
             target: aarch64
           - os: windows-latest
             target: x86_64
@@ -33,7 +33,7 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist
+          args: --release --out dist -i python3.12
           working-directory: sdks/python
           manylinux: auto
 
