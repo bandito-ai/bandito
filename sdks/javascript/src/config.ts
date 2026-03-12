@@ -8,6 +8,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
+import { parse as parseToml } from "smol-toml";
 
 export const DEFAULT_BASE_URL = "https://bandito-api.onrender.com";
 const CONFIG_DIR = path.join(os.homedir(), ".bandito");
@@ -33,10 +34,7 @@ export function loadConfig(): BanditoConfig {
   if (fs.existsSync(CONFIG_FILE)) {
     try {
       const content = fs.readFileSync(CONFIG_FILE, "utf-8");
-      // Use smol-toml for parsing
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const toml = require("smol-toml");
-      const data = toml.parse(content);
+      const data = parseToml(content);
       if (data.api_key) config.apiKey = data.api_key;
       if (data.base_url) config.baseUrl = data.base_url;
       if (data.data_storage) config.dataStorage = data.data_storage;

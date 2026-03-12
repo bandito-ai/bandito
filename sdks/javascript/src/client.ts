@@ -165,7 +165,7 @@ export class BanditoClient {
 
     const engine = this.engines.get(banditName)!;
     const queryLength = options.query?.length ?? undefined;
-    const excludeIds = options.exclude?.map((id) => id) ?? undefined;
+    const excludeIds = options.exclude ? Int32Array.from(options.exclude) : undefined;
 
     const resultJson = engine.pull(queryLength, excludeIds);
     const raw: EnginePullResult = JSON.parse(resultJson);
@@ -398,7 +398,7 @@ export class BanditoClient {
       const flushedUuids = alive
         .map((e) => e.local_event_uuid)
         .filter((uid) => !erroredUuids.has(uid));
-      if (flushedUuids.length > 0) {
+      if (flushedUuids.length > 0 && this.store) {
         this.store.markFlushed(flushedUuids);
       }
     } catch (err) {

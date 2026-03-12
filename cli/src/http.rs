@@ -104,6 +104,35 @@ impl HttpClient {
         handle_response(resp, path)
     }
 
+    /// DELETE (no body, tolerates 204 empty response)
+    pub fn delete(&self, path: &str) -> Result<()> {
+        let resp = self
+            .client
+            .delete(self.url(path))
+            .headers(self.auth_headers())
+            .send()
+            .with_context(|| format!("DELETE {} failed", path))?;
+
+        let status = resp.status();
+        if status.is_success() {
+            Ok(())
+        } else {
+            let body = resp.text().unwrap_or_default();
+            let detail = serde_json::from_str::<Value>(&body)
+                .ok()
+                .and_then(|v| v.get("detail").cloned())
+                .map(|d| {
+                    if d.is_string() {
+                        d.as_str().unwrap().to_string()
+                    } else {
+                        d.to_string()
+                    }
+                })
+                .unwrap_or_else(|| body.clone());
+            bail!("{} {} — {}", status.as_u16(), path, detail)
+        }
+    }
+
     /// PATCH with JSON body
     pub fn patch_json(&self, path: &str, body: &Value) -> Result<Value> {
         let resp = self

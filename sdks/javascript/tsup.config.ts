@@ -8,4 +8,7 @@ export default defineConfig({
   sourcemap: true,
   clean: true,
   external: ["better-sqlite3"],
+  esbuildOptions(options) {
+    options.external = [...(options.external ?? []), "../wasm/bandito_engine"];
+  },
 });

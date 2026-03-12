@@ -5,9 +5,9 @@
  * and re-exports the BanditEngine constructor for the client.
  */
 
-import type { BanditEngine as WasmBanditEngine } from "../../engine/pkg/bandito_engine";
+import type { BanditEngine as WasmBanditEngine } from "../wasm/bandito_engine";
 
-let wasmModule: typeof import("../../engine/pkg/bandito_engine") | null = null;
+let wasmModule: typeof import("../wasm/bandito_engine") | null = null;
 
 /**
  * Initialize the WASM module. Must be called before creating BanditEngine instances.
@@ -15,7 +15,7 @@ let wasmModule: typeof import("../../engine/pkg/bandito_engine") | null = null;
  */
 export async function initWasm(): Promise<void> {
   if (wasmModule) return;
-  wasmModule = await import("../../engine/pkg/bandito_engine");
+  wasmModule = await import("../wasm/bandito_engine");
 }
 
 /**

@@ -1,7 +1,7 @@
 class Bandito < Formula
   desc "CLI and TUI grading workbench for Bandito — contextual bandit optimizer for LLM selection"
   homepage "https://bandito.dev"
-  version "0.1.3"
+  version "0.1.4"
   license "MIT"
 
   on_macos do

@@ -90,6 +90,13 @@ enum ArmCmd {
         #[arg(long)]
         prompt_file: Option<String>,
     },
+    /// Deactivate an arm (soft-delete, keeps history)
+    Deactivate {
+        /// Bandit name
+        bandit: String,
+        /// Model name to deactivate
+        model: String,
+    },
 }
 
 #[derive(clap::Args)]
@@ -125,6 +132,7 @@ fn main() -> anyhow::Result<()> {
                 prompt,
                 prompt_file,
             } => commands::arm::add(&bandit, &model, &provider, &prompt, prompt_file.as_deref())?,
+            ArmCmd::Deactivate { bandit, model } => commands::arm::deactivate(&bandit, &model)?,
         },
         Commands::Leaderboard(args) => {
             commands::leaderboard::run(&args.bandit, args.graded, args.watch)?

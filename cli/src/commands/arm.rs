@@ -77,6 +77,48 @@ pub fn add(bandit_name: &str, model: &str, provider: &str, prompt: &str, prompt_
     Ok(())
 }
 
+pub fn deactivate(bandit_name: &str, model_name: &str) -> Result<()> {
+    let config = Config::load()?;
+    if !config.is_configured() {
+        bail!("Not configured. Run `bandito signup` or `bandito config` first.");
+    }
+    let http = HttpClient::from_config(&config)?;
+
+    let bandit_id = resolve_bandit_id(&http, bandit_name)?;
+    let resp = http.get(&format!("/bandits/{}/arms", bandit_id), &[])?;
+    let items = resp["items"]
+        .as_array()
+        .ok_or_else(|| anyhow::anyhow!("Unexpected response format"))?;
+
+    let arm = items.iter().find(|item| {
+        item["model_name"].as_str() == Some(model_name)
+    });
+
+    let arm = match arm {
+        Some(a) => a,
+        None => {
+            let names: Vec<&str> = items
+                .iter()
+                .filter_map(|i| i["model_name"].as_str())
+                .collect();
+            bail!(
+                "Arm \"{}\" not found in \"{}\". Available: [{}]",
+                model_name,
+                bandit_name,
+                names.join(", ")
+            )
+        }
+    };
+
+    let arm_id = arm["id"]
+        .as_i64()
+        .ok_or_else(|| anyhow::anyhow!("Arm has no id"))?;
+
+    http.delete(&format!("/bandits/{}/arms/{}", bandit_id, arm_id))?;
+    println!("Deactivated \"{}\" from \"{}\".", model_name, bandit_name);
+    Ok(())
+}
+
 /// Resolve a bandit name to its ID by listing all bandits.
 pub fn resolve_bandit_id(http: &HttpClient, name: &str) -> Result<i64> {
     let resp = http.get("/bandits", &[])?;

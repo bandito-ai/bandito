@@ -35,6 +35,54 @@ pub fn run(bandit_name: &str, graded: bool, watch: bool) -> Result<()> {
     Ok(())
 }
 
+fn convergence_line(arms: &[serde_json::Value], total_events: i64) -> String {
+    const MIN_EVENTS: i64 = 20;
+
+    if total_events == 0 {
+        return "No events yet — make sure your app is calling bandito.update().".to_string();
+    }
+    if total_events < MIN_EVENTS {
+        return format!(
+            "Too few events to assess ({}/{} minimum).",
+            total_events, MIN_EVENTS
+        );
+    }
+
+    // Find the leading arm by pull_share
+    let leader = arms
+        .iter()
+        .max_by(|a, b| {
+            let sa = a["pull_share"].as_f64().unwrap_or(0.0);
+            let sb = b["pull_share"].as_f64().unwrap_or(0.0);
+            sa.partial_cmp(&sb).unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+    let Some(leader) = leader else {
+        return "No arm data.".to_string();
+    };
+
+    let share = leader["pull_share"].as_f64().unwrap_or(0.0);
+    let model = leader["model_name"].as_str().unwrap_or("?");
+    let pct = share * 100.0;
+
+    if share >= 0.80 {
+        format!(
+            "Converged -> {} ({:.0}% of traffic). The bandit has high confidence in this arm.",
+            model, pct
+        )
+    } else if share >= 0.60 {
+        format!(
+            "Converging -> {} ({:.0}% of traffic). Keep collecting events to confirm.",
+            model, pct
+        )
+    } else {
+        format!(
+            "Still exploring — no clear winner yet ({:.0}% leading). Need more events or a stronger reward signal.",
+            pct
+        )
+    }
+}
+
 fn render_leaderboard(
     http: &HttpClient,
     bandit_name: &str,
@@ -51,55 +99,60 @@ fn render_leaderboard(
         .as_array()
         .ok_or_else(|| anyhow::anyhow!("Unexpected response format"))?;
 
-    // When --graded, use graded-specific metrics and counts
-    if graded {
-        let total_graded: i64 = arms.iter().map(|a| a["graded_count"].as_i64().unwrap_or(0)).sum();
-        println!("{} (graded only, {} events)\n", bandit_name, total_graded);
-    } else {
-        println!("{} ({} events)\n", bandit_name, total_events);
-    }
+    // Header
+    println!("{} ({} events)\n", bandit_name, total_events);
+
+    // Convergence signal
+    println!("Status: {}\n", convergence_line(arms, total_events));
 
     if arms.is_empty() {
         println!("No data yet. Make sure your app is calling bandito.update() after each LLM call.");
         return Ok(());
     }
 
+    // Column widths:  Arm(25)  Pulls(6)  Pull%(6)  Reward(7)  Grade(6)  Graded%(8)  Cost(9)  Latency(10)
     println!(
-        "{:<30} {:>7} {:>7} {:>8} {:>10} {:>12}",
-        "Arm", "Pulls", "Pull%", "Reward", "Avg Cost", "Avg Latency"
+        "{:<25} {:>6} {:>6} {:>7} {:>6} {:>7} {:>9} {:>10}",
+        "Arm", "Pulls", "Pull%", "Reward", "Grade", "Graded%", "Avg Cost", "Avg Latency"
     );
-    println!("{}", "-".repeat(78));
+    println!("{}", "-".repeat(85));
 
     let mut rows_printed = 0;
     for arm in arms {
         let model = arm["model_name"].as_str().unwrap_or("?");
-        let provider = arm["model_provider"].as_str().unwrap_or("?");
-        let arm_label = format!("{} / {}", model, provider);
-
         let event_count = arm["event_count"].as_i64().unwrap_or(0);
         let pull_share = arm["pull_share"].as_f64().unwrap_or(0.0);
+        let avg_reward = arm["avg_reward"].as_f64();
+        let avg_grade = arm["avg_grade"].as_f64();
+        let graded_count = arm["graded_count"].as_i64().unwrap_or(0);
 
-        // --graded: show avg_grade and graded count; default: show avg_reward and total count
-        let (reward, count) = if graded {
-            (arm["avg_grade"].as_f64(), arm["graded_count"].as_i64().unwrap_or(0))
-        } else {
-            (arm["avg_reward"].as_f64(), event_count)
-        };
+        // graded_ratio: prefer field from API, fall back to computing it
+        let graded_ratio = arm["graded_ratio"]
+            .as_f64()
+            .unwrap_or_else(|| {
+                if event_count > 0 {
+                    graded_count as f64 / event_count as f64
+                } else {
+                    0.0
+                }
+            });
 
         let avg_cost = arm["avg_cost"].as_f64();
         let avg_latency = arm["avg_latency"].as_f64();
 
-        // Skip arms with no graded events when filtering
-        if graded && count == 0 {
+        // --graded: skip arms with no human grades
+        if graded && graded_count == 0 {
             continue;
         }
 
         println!(
-            "{:<30} {:>7} {:>6.1}% {:>8} {:>10} {:>12}",
-            truncate(&arm_label, 30),
-            count,
+            "{:<25} {:>6} {:>5.1}% {:>7} {:>6} {:>6.0}% {:>9} {:>10}",
+            truncate(model, 25),
+            event_count,
             pull_share * 100.0,
-            format_opt_f64(reward, 2),
+            format_opt_f64(avg_reward, 2),
+            format_opt_f64(avg_grade, 2),
+            graded_ratio * 100.0,
             format_cost(avg_cost),
             format_latency(avg_latency),
         );
