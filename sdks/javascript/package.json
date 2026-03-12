@@ -1,6 +1,6 @@
 {
   "name": "bandito",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Contextual bandit optimizer for LLM model and prompt selection",
   "main": "dist/index.js",
   "module": "dist/index.mjs",

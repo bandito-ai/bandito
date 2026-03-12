@@ -42,7 +42,7 @@ If not installed, guide them:
 brew install bandito-ai/tap/bandito
 
 # Any platform with Rust
-cargo install --path cli
+cargo install --git https://github.com/bandito-ai/bandito bandito-cli
 ```
 
 ### Account + First Bandit
@@ -59,6 +59,17 @@ If they already have an account:
 bandito config          # reconfigure API key
 bandito create          # interactive bandit + arm creation
 ```
+
+> **Claude Code:** `bandito signup` and `bandito config` are interactive — pause and ask the user to run these. Once their account is set up, you can handle everything else autonomously: create bandits from JSON templates, add arms, write integration code, and monitor the leaderboard.
+
+### Data storage decision
+
+Before installing the SDK, ask the user about their data sensitivity:
+
+- **`data_storage = "local"` (default):** query and response text stays on the user's machine. Only metadata (tokens, cost, latency, reward) goes to the cloud. Use this for sensitive data — medical, legal, financial, or anything with PII.
+- **`data_storage = "cloud"`:** full query and response text is sent to Bandito's servers, enabling cloud-side analytics and search.
+
+This is set in `~/.bandito/config.toml` and during `bandito signup`. Default is `"local"` — if the user has any doubt, keep it local.
 
 ### Install the SDK
 
@@ -98,6 +109,18 @@ Each arm is a (model, provider, system_prompt) tuple. Help them think about what
 - **Different models:** gpt-4o vs claude-sonnet-4-20250514 vs gemini-2.0-flash
 - **Different providers for same model:** openai vs azure for gpt-4o
 - **Different prompts:** concise vs detailed, formal vs casual, with/without examples
+
+> **Multi-provider warning:** If arms span multiple providers (e.g., OpenAI + Anthropic), the user needs routing logic keyed on `result.provider`. Before writing custom `if result.provider == ...` branching, recommend a provider abstraction layer: **LiteLLM** (`litellm.completion(model=f"{result.provider}/{result.model}", ...)`) or **OpenRouter** (route everything through one endpoint). Raise this as a design decision before writing any integration code.
+
+### Step 3.5: Design checkpoint
+
+Before writing code, confirm:
+1. **How many bandits?** One per distinct LLM use case. A chatbot and a summarizer are separate bandits.
+2. **Multi-step pipeline?** If the output of one LLM call feeds into another (e.g., text→SQL then SQL→visualization), each step is its own bandit. See the multi-step pattern below.
+3. **Multi-provider?** If yes, pick LiteLLM or OpenRouter now — don't write provider routing logic.
+4. **Reward signal?** What measurable thing indicates a good response? Settle this before integrating — the reward function shapes everything. (See Phase 3.)
+5. **Cost and latency importance?** `cost_importance` and `latency_importance` (0-5) are set at bandit creation. 0 = ignore, 5 = heavily penalize. Ask: does cost matter here? Does latency matter? These can be tuned later but setting them intentionally upfront means the bandit learns the right tradeoff from the start.
+6. **Optimization mode?** Start with `"explore"` — the bandit needs diverse data before it can converge. Plan to switch to `"base"` or `"maximize"` once enough events have been collected.
 
 ### Step 4: Write the integration code
 
@@ -181,6 +204,28 @@ await close();
 - `update()` is synchronous — writes to local SQLite, flushes to cloud in background
 - Token counts are optional but enable automatic cost tracking
 - `reward` is optional but critical for learning (see Phase 3)
+
+**Multi-step pipeline pattern (Python):**
+
+Each step is its own bandit. Chain them by passing the previous step's output as context to the next `pull()`.
+
+```python
+# Step 1: text → SQL
+sql_result = bandito.pull("text-to-sql", query=user_question)
+sql_response = run_llm(model=sql_result.model, prompt=sql_result.prompt, query=user_question)
+sql_reward = 1.0 if execute_sql(sql_response.text) else 0.0
+bandito.update(sql_result, response=sql_response.text, reward=sql_reward, ...)
+
+# Step 2: SQL results → visualization (context includes the data shape)
+context = f"columns: {get_columns(sql_response.text)}"
+viz_result = bandito.pull("viz-selector", query=context)
+viz_response = run_llm(model=viz_result.model, prompt=viz_result.prompt, query=context)
+bandito.update(viz_result, response=viz_response.text, ...)
+```
+
+Each bandit learns independently. The reward for each step reflects that step's quality — don't try to combine them into one signal.
+
+> **Scope note:** Bandito handles the routing layer for each step. Domain-specific setup (DB connections, schema context, component registries) is outside the skill's scope — ask the user to describe their architecture before writing integration code.
 
 ### Step 5: Adapt to their LLM client
 
@@ -351,22 +396,82 @@ bandito.update(result, query_text=msg, response=text, input_tokens=inp, output_t
 
 ### JavaScript Reward Examples
 
-The same patterns apply. Example composite:
+All the same patterns apply in TypeScript:
+
+**Pattern 1: Format compliance**
 ```typescript
 function computeReward(userMessage: string, responseText: string): number {
+  try {
+    const data = JSON.parse(responseText);
+    const hasFields = ["answer", "confidence"].every(k => k in data);
+    return hasFields ? 1.0 : 0.3;
+  } catch {
+    return 0.0;
+  }
+}
+```
+
+**Pattern 2: Length-based**
+```typescript
+function computeReward(userMessage: string, responseText: string): number {
+  const wordCount = responseText.split(/\s+/).length;
+  if (wordCount < 10) return 0.2;
+  if (wordCount > 500) return 0.5;
+  return 1.0;
+}
+```
+
+**Pattern 3: Keyword/constraint satisfaction**
+```typescript
+function computeReward(userMessage: string, responseText: string): number {
+  const lower = responseText.toLowerCase();
   const scores: number[] = [];
 
-  // Not a refusal
-  const refusals = ["i can't", "i cannot", "i'm unable"];
-  const lower = responseText.toLowerCase();
-  scores.push(refusals.some(r => lower.includes(r)) ? 0.0 : 1.0);
+  const refusals = ["i can't", "i cannot", "i'm unable", "as an ai"];
+  scores.push(refusals.some(p => lower.includes(p)) ? 0.0 : 1.0);
 
-  // Reasonable length
-  const words = responseText.split(/\s+/).length;
-  scores.push(words >= 20 && words <= 300 ? 1.0 : 0.5);
+  const ctas = ["click", "sign up", "get started", "try"];
+  scores.push(ctas.some(w => lower.includes(w)) ? 1.0 : 0.0);
 
   return scores.reduce((a, b) => a + b, 0) / scores.length;
 }
+```
+
+**Pattern 4: Similarity to reference**
+```typescript
+function computeReward(userMessage: string, responseText: string, reference: string): number {
+  const responseWords = new Set(responseText.toLowerCase().split(/\s+/));
+  const referenceWords = new Set(reference.toLowerCase().split(/\s+/));
+  if (referenceWords.size === 0) return 0.5;
+  const overlap = [...referenceWords].filter(w => responseWords.has(w)).length;
+  return Math.min(overlap / referenceWords.size, 1.0);
+}
+```
+
+**Pattern 5: Composite scorer**
+```typescript
+function computeReward(userMessage: string, responseText: string): number {
+  const scores: number[] = [];
+  const lower = responseText.toLowerCase();
+
+  const refusals = ["i can't", "i cannot", "i'm unable"];
+  scores.push(refusals.some(r => lower.includes(r)) ? 0.0 : 1.0);
+
+  const words = responseText.split(/\s+/).length;
+  scores.push(words >= 20 && words <= 300 ? 1.0 : 0.5);
+
+  const hasUrl = /https?:\/\/\S+/.test(responseText);
+  scores.push(hasUrl ? 0.5 : 1.0);
+
+  return scores.reduce((a, b) => a + b, 0) / scores.length;
+}
+```
+
+**Pattern 6: No reward (cost/latency optimization only)**
+```typescript
+// Don't pass reward — Bandito still optimizes on cost and latency
+update(result, { queryText: msg, response: text, inputTokens: inp, outputTokens: out });
+// Then grade manually: bandito tui
 ```
 
 ### After Writing the Reward Function
@@ -389,13 +494,15 @@ bandito leaderboard BANDIT_NAME --graded   # filtered to human-graded events
 bandito leaderboard BANDIT_NAME --watch    # auto-refresh every 30s
 ```
 
+**Cold start:** Early on, arm selection will look random — that's normal. Thompson Sampling is exploring. Don't read into early leaderboard results. Convergence requires enough events for the posterior to tighten; with a good reward signal this typically takes hundreds of events, not dozens. If pull% is still spread evenly after significant traffic, the bandit needs more data or a stronger reward signal — not a bug.
+
 Help interpret results:
-- **Pull%** — how often each arm is selected. Should converge over time.
+- **Pull%** — how often each arm is selected. Should converge over time toward the best arm(s).
 - **Reward** — average composite reward. Higher is better.
 - **Avg Cost** — per-request cost. Compare across arms.
 - **Avg Latency** — response time. Compare across arms.
 - If one arm dominates pull% with high reward, the bandit is converging.
-- If pull% is still spread evenly, the bandit is still exploring — needs more data.
+- If pull% is still spread evenly, the bandit is still exploring — needs more data or a stronger reward signal.
 
 ### Grading
 
@@ -434,7 +541,8 @@ data_storage = "local"
 ## Guidelines
 
 - Always use the exact SDK API surface: `connect()`, `pull()`, `update()`, `grade()`, `sync()`, `close()`
-- `pull()` and `update()` are synchronous (no await). `connect()`, `grade()`, `sync()`, `close()` are async.
+- **Python SDK:** all methods are synchronous — no `await` anywhere.
+- **JavaScript SDK:** `pull()` and `update()` are synchronous (WASM math + SQLite, no network). `connect()`, `grade()`, `sync()`, `close()` are async (HTTP).
 - Reward is always 0.0-1.0. Never include cost or latency in the reward — Bandito handles that separately.
 - When writing integration code, match the user's existing code style and LLM client.
 - Don't over-engineer the reward function. Start simple, iterate based on leaderboard data and grading sessions.
