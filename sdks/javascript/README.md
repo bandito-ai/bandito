@@ -5,7 +5,7 @@ Zero-latency LLM routing via contextual bandits. `pull()` runs Thompson Sampling
 ## Install
 
 ```bash
-pnpm add bandito
+pnpm add @bandito-ai/sdk
 ```
 
 Requires Node.js 18+. The [Bandito CLI](../../cli/README.md) is a separate binary for account setup, bandit management, and grading:
@@ -18,7 +18,7 @@ bandito signup
 ## Quickstart
 
 ```typescript
-import { connect, pull, update, close } from "bandito";
+import { connect, pull, update, close } from "@bandito-ai/sdk";
 
 await connect();
 
@@ -52,7 +52,7 @@ Latency is auto-measured between `pull()` and `update()`. Cost is auto-calculate
 **Module-level singleton** (simplest):
 
 ```typescript
-import { connect, pull, update, close } from "bandito";
+import { connect, pull, update, close } from "@bandito-ai/sdk";
 await connect({ apiKey: "bnd_..." });
 const result = pull("my-chatbot");
 ```
@@ -60,7 +60,7 @@ const result = pull("my-chatbot");
 **Explicit client** (recommended for servers):
 
 ```typescript
-import { BanditoClient } from "bandito";
+import { BanditoClient } from "@bandito-ai/sdk";
 
 const client = new BanditoClient({ apiKey: "bnd_..." });
 await client.connect();

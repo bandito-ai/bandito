@@ -1,6 +1,6 @@
 {
-  "name": "bandito",
-  "version": "0.1.2",
+  "name": "@bandito-ai/sdk",
+  "version": "0.1.3",
   "description": "Contextual bandit optimizer for LLM model and prompt selection",
   "main": "dist/index.js",
   "module": "dist/index.mjs",

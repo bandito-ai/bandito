@@ -80,7 +80,7 @@ pip install bandito   # or: uv add bandito
 
 **JavaScript/TypeScript:**
 ```bash
-pnpm add bandito   # or: npm install bandito
+pnpm add @bandito-ai/sdk   # or: npm install @bandito-ai/sdk
 ```
 
 ---
@@ -162,7 +162,7 @@ bandito.close()
 
 **JavaScript/TypeScript pattern:**
 ```typescript
-import { connect, pull, update, close } from "bandito";
+import { connect, pull, update, close } from "@bandito-ai/sdk";
 
 await connect();  // reads ~/.bandito/config.toml
 

@@ -27,7 +27,7 @@ Requires Python 3.12+.
 ### JavaScript/TypeScript SDK
 
 ```bash
-pnpm add bandito   # or: npm install bandito
+pnpm add @bandito-ai/sdk   # or: npm install @bandito-ai/sdk
 ```
 
 Requires Node.js 18+.
