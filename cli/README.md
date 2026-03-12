@@ -9,7 +9,7 @@ Command-line tool and TUI grading workbench for [Bandito](https://bandito.dev) â
 brew install bandito-ai/tap/bandito
 
 # From source (any platform)
-cargo install --path cli
+cargo install --git https://github.com/bandito-ai/bandito bandito-cli
 ```
 
 ## Quickstart
@@ -58,13 +58,14 @@ bandito tui                       # grade responses interactively
 | `bandito arm list <bandit>` | Show arms for a bandit |
 | `bandito arm add <bandit> <model> <provider> [prompt]` | Add an arm (prompt defaults to "You are a helpful assistant.") |
 | `bandito arm add <bandit> <model> <provider> --prompt-file <file>` | Add an arm with system prompt from file |
+| `bandito arm deactivate <bandit> <model>` | Soft-deactivate an arm (keeps history, stops receiving traffic) |
 
 ### Monitoring
 
 | Command | What it does |
 |---------|-------------|
-| `bandito leaderboard <bandit>` | Arm performance table (pulls, reward, cost, latency) |
-| `bandito leaderboard <bandit> --graded` | Same, filtered to graded events only |
+| `bandito leaderboard <bandit>` | Arm performance table with convergence status (pulls, reward, grade, cost, latency) |
+| `bandito leaderboard <bandit> --graded` | Same, filtered to arms with human grades |
 | `bandito leaderboard <bandit> --watch` | Auto-refresh every 30s |
 
 ### Templates

@@ -13,7 +13,7 @@ Provider-agnostic contextual bandit optimizer for LLM model and prompt selection
 brew install bandito-ai/tap/bandito
 
 # From source (any platform)
-cargo install --path cli
+cargo install --git https://github.com/bandito-ai/bandito bandito-cli
 ```
 
 ### Python SDK
