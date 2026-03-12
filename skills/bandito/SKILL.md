@@ -538,6 +538,60 @@ data_storage = "local"
 
 ---
 
+## CLI Reference
+
+Complete command list. Commands marked **interactive** require user input — pause and ask the user to run these.
+
+### Account & Config
+
+| Command | Interactive | What it does |
+|---------|-------------|-------------|
+| `bandito signup` | **yes** | Create account + API key + first bandit + SDK snippet |
+| `bandito config` | **yes** | Reconfigure API key (validates connection) |
+| `bandito install python` | no | Install Python SDK via uv or pip |
+| `bandito install js` | no | Install JS SDK via pnpm, npm, or yarn |
+| `bandito skill` | no | Install `/bandito` skill into current project |
+
+### Bandits & Arms
+
+| Command | What it does |
+|---------|-------------|
+| `bandito template bandit <name>` | Write `<name>.json` skeleton with placeholder arms |
+| `bandito create <file.json>` | Create bandit + arms from JSON file |
+| `bandito create` | Create bandit interactively (**interactive**) |
+| `bandito list` | Show all bandits |
+| `bandito arm list <bandit>` | Show arms for a bandit |
+| `bandito arm add <bandit> <model> <provider> [prompt]` | Add arm (prompt defaults to "You are a helpful assistant.") |
+| `bandito arm add <bandit> <model> <provider> --prompt-file <file>` | Add arm with prompt from file |
+
+### Monitoring
+
+| Command | What it does |
+|---------|-------------|
+| `bandito leaderboard <bandit>` | Arm performance table (pulls, reward, cost, latency) |
+| `bandito leaderboard <bandit> --graded` | Filtered to graded events only |
+| `bandito leaderboard <bandit> --watch` | Auto-refresh every 30s |
+
+### Templates
+
+| Command | What it does |
+|---------|-------------|
+| `bandito template script --sdk python` | Write `bandito_example.py` starter |
+| `bandito template script --sdk js` | Write `bandito_example.ts` starter |
+
+### TUI Keybindings
+
+| Key | Action |
+|-----|--------|
+| `j`/`k` | Navigate events |
+| `y` / `n` | Grade good / bad |
+| `s` | Skip |
+| `r` | Refresh |
+| `1`/`2`/`3` | Copy user input / response / system prompt |
+| `q` / `Esc` | Back / quit |
+
+---
+
 ## Guidelines
 
 - Always use the exact SDK API surface: `connect()`, `pull()`, `update()`, `grade()`, `sync()`, `close()`

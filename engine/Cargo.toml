@@ -1,6 +1,6 @@
 [package]
 name = "bandito-engine"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "Pure math engine for Bandito contextual bandit optimization"
 license = "MIT"
