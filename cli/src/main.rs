@@ -1,6 +1,8 @@
 mod commands;
 mod config;
 mod http;
+mod judge_client;
+mod s3;
 mod store;
 mod tui;
 pub mod util;
@@ -45,6 +47,56 @@ enum Commands {
     Skill,
     /// Launch the grading workbench TUI
     Tui,
+    /// LLM-as-judge: generate rubrics, calibrate, and augment grades
+    Judge {
+        #[command(subcommand)]
+        cmd: JudgeCmd,
+    },
+}
+
+#[derive(Subcommand)]
+enum JudgeCmd {
+    /// Set judge API key and model interactively
+    Config,
+    /// Generate a quality rubric for a bandit via LLM
+    GenRubric {
+        /// Bandit name
+        bandit: String,
+    },
+    /// Open the rubric in $EDITOR for manual editing
+    EditRubric {
+        /// Bandit name
+        bandit: String,
+    },
+    /// Score human-graded events to measure judge accuracy (no writes)
+    Calibrate {
+        /// Bandit name
+        bandit: String,
+        /// Total events to sample across all arms
+        #[arg(long, default_value = "50")]
+        sample: usize,
+    },
+    /// Grade ungraded events with LLM judge (writes to cloud)
+    Augment {
+        /// Bandit name
+        bandit: String,
+        /// Total events to grade across all arms
+        #[arg(long, default_value = "100")]
+        sample: usize,
+    },
+    /// Show events with both human and judge grades
+    Review {
+        /// Bandit name
+        bandit: String,
+        /// Show only events where human and judge disagree (delta >= 0.5)
+        #[arg(long)]
+        disagreements: bool,
+    },
+    /// Show judge configuration and metrics for a bandit
+    Status {
+        /// Bandit name
+        bandit: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -90,6 +142,13 @@ enum ArmCmd {
         #[arg(long)]
         prompt_file: Option<String>,
     },
+    /// Activate a previously deactivated arm
+    Activate {
+        /// Bandit name
+        bandit: String,
+        /// Model name to activate
+        model: String,
+    },
     /// Deactivate an arm (soft-delete, keeps history)
     Deactivate {
         /// Bandit name
@@ -132,6 +191,7 @@ fn main() -> anyhow::Result<()> {
                 prompt,
                 prompt_file,
             } => commands::arm::add(&bandit, &model, &provider, &prompt, prompt_file.as_deref())?,
+            ArmCmd::Activate { bandit, model } => commands::arm::activate(&bandit, &model)?,
             ArmCmd::Deactivate { bandit, model } => commands::arm::deactivate(&bandit, &model)?,
         },
         Commands::Leaderboard(args) => {
@@ -140,6 +200,15 @@ fn main() -> anyhow::Result<()> {
         Commands::Install { sdk } => commands::install::run(&sdk)?,
         Commands::Skill => commands::skill::run()?,
         Commands::Tui => tui::run()?,
+        Commands::Judge { cmd } => match cmd {
+            JudgeCmd::Config => commands::judge::config_judge()?,
+            JudgeCmd::GenRubric { bandit } => commands::judge::gen_rubric(&bandit)?,
+            JudgeCmd::EditRubric { bandit } => commands::judge::edit_rubric(&bandit)?,
+            JudgeCmd::Calibrate { bandit, sample } => commands::judge::calibrate(&bandit, sample)?,
+            JudgeCmd::Augment { bandit, sample } => commands::judge::augment(&bandit, sample)?,
+            JudgeCmd::Review { bandit, disagreements } => commands::judge::review(&bandit, disagreements)?,
+            JudgeCmd::Status { bandit } => commands::judge::status(&bandit)?,
+        },
     }
 
     Ok(())

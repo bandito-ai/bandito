@@ -23,6 +23,11 @@ dependencies = [
     "httpx>=0.28.1",
 ]
 
+[project.optional-dependencies]
+s3 = [
+    "boto3>=1.26.0",
+]
+
 [project.urls]
 Homepage = "https://bandito.dev"
 Repository = "https://github.com/bandito-ai/bandito"

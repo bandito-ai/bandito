@@ -81,12 +81,15 @@ pub fn run() -> Result<()> {
         api_key: raw_key.to_string(),
         base_url,
         data_storage: data_storage.to_string(),
+        s3: None,
+        judge: Default::default(),
     };
     config.save()?;
 
     println!("\nAccount created for {} (org: {})", email, org_name);
     println!("API key: {}", raw_key);
-    println!("(Shown once — saved in ~/.bandito/config.toml)\n");
+    println!("(Shown once — saved in ~/.bandito/config.toml)");
+    println!("Keep this secret — do not commit it to version control.\n");
 
     // 5. Offer to create first bandit
     let setup_options = &["Yes", "No, I'll do it later"];

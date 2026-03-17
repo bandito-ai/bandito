@@ -112,7 +112,7 @@ impl BanditEngineCore {
     pub fn pull_inner(
         &mut self,
         query_length: Option<usize>,
-        exclude_ids: Option<Vec<i32>>,
+        exclude_ids: Option<Vec<i64>>,
     ) -> Result<String, String> {
         if self.n_arms == 0 {
             return Err("No arms available".to_string());
@@ -161,7 +161,6 @@ impl BanditEngineCore {
         let exclude_set: HashSet<i64> = exclude_ids
             .unwrap_or_default()
             .into_iter()
-            .map(|id| id as i64)
             .collect();
 
         let mut scores: HashMap<i64, f64> = HashMap::new();

@@ -36,7 +36,7 @@ impl PyBanditEngine {
     fn pull(
         &mut self,
         query_length: Option<usize>,
-        exclude_ids: Option<Vec<i32>>,
+        exclude_ids: Option<Vec<i64>>,
     ) -> PyResult<String> {
         self.inner
             .pull_inner(query_length, exclude_ids)

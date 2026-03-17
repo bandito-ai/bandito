@@ -127,12 +127,46 @@ All Bandito tools share `~/.bandito/config.toml`:
 
 ```toml
 api_key = "bnd_..."
-data_storage = "local"
+data_storage = "local"   # "cloud" | "local" | "s3"
 ```
 
-Created by `bandito signup` (which also creates your first bandit and prints an SDK snippet) or `bandito config`. Environment variables `BANDITO_API_KEY` and `BANDITO_DATA_STORAGE` override the file.
+Created by `bandito signup` or `bandito config`. Environment variable overrides: `BANDITO_API_KEY`, `BANDITO_DATA_STORAGE`, `BANDITO_S3_BUCKET`, `BANDITO_S3_PREFIX`, `BANDITO_S3_REGION`.
 
-The `data_storage` setting controls privacy: `"local"` (default) keeps query and response text on your machine in SQLite. Only metadata (model, reward, cost, latency, tokens) goes to the cloud. Set `"cloud"` to send full text for cloud-side analytics.
+### data_storage
+
+Controls where query text and response text are stored. The learning signal (metadata: model, arm, reward, cost, latency, tokens) always flows to Bandito cloud regardless of this setting.
+
+**`"local"` (default)** — Events written to `~/.bandito/events.db` via SQLite WAL. Query and response text stay on your machine. Only metadata is sent to Bandito cloud. Best for experimentation and privacy. The TUI grading workbench reads from local SQLite.
+
+**`"cloud"`** — Full event data (including query and response text) stored in Bandito cloud. Enables cloud-side analytics, LLM-as-judge evaluation, and event clustering without any infrastructure to manage.
+
+**`"s3"`** — Same crash-safe SQLite WAL as local mode, but the SDK also exports events to your S3 bucket in OTLP JSON format. Query and response text stay off Bandito's servers. You own the data in your infrastructure.
+
+```toml
+data_storage = "s3"
+
+[s3]
+bucket = "my-events-bucket"
+prefix = "bandito"          # optional, default "bandito"
+region = "us-east-1"        # optional, default "us-east-1"
+```
+
+AWS credentials are resolved via the standard credential chain (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` env vars or `~/.aws/credentials`) — they are not stored in config.
+
+**Migrating from local → s3:** Change `data_storage = "s3"`, add the `[s3]` section, and restart. On next `connect()` the SDK automatically exports all existing SQLite events to S3. No explicit migration command needed.
+
+### S3 env vars
+
+For container/k8s deployments without a config file:
+
+```
+BANDITO_DATA_STORAGE=s3
+BANDITO_S3_BUCKET=my-events-bucket
+BANDITO_S3_PREFIX=bandito        # optional, default "bandito"
+BANDITO_S3_REGION=us-east-1      # optional, default "us-east-1"
+```
+
+These override the `[s3]` TOML section when set.
 
 ## Key Concepts
 

@@ -7,9 +7,11 @@ then submits a non-blocking flush to a single-threaded executor.
 
 from __future__ import annotations
 
+import datetime
 import json
 import logging
 import os
+import re
 import threading
 import time
 import uuid
@@ -91,6 +93,7 @@ class BanditoClient:
         self._seed = _seed
         self._dead_uuids: set[str] = set()  # events permanently rejected by server
         self._retry_counts: dict[str, int] = {}  # uuid -> rejection count
+        self._s3_timer: threading.Timer | None = None
 
     def __enter__(self) -> BanditoClient:
         self.connect()
@@ -132,6 +135,24 @@ class BanditoClient:
             os.makedirs(os.path.dirname(store_path), exist_ok=True)
         self._store = EventStore(store_path)
 
+        # Init S3 exporter if data_storage is "s3"
+        self._s3_client: Any = None
+        self._s3_config: Any = None
+        if self._data_storage == "s3":
+            if config.s3 is not None:
+                try:
+                    import boto3 as _boto3  # type: ignore[import]
+                    s3_kwargs: dict[str, Any] = {"region_name": config.s3.region}
+                    if config.s3.endpoint:
+                        s3_kwargs["endpoint_url"] = config.s3.endpoint
+                    self._s3_client = _boto3.client("s3", **s3_kwargs)
+                    self._s3_config = config.s3
+                    logger.info("S3 exporter configured → s3://%s/%s", config.s3.bucket, config.s3.prefix)
+                except ImportError:
+                    logger.warning("data_storage='s3' requires boto3: pip install bandito[s3]")
+            else:
+                logger.warning("data_storage='s3' requires [s3] config section (bucket, prefix, region)")
+
         # Bootstrap: fetch state, hydrate cache, flush pending.
         # If anything fails, clean up _http/_store so a retry of connect()
         # doesn't orphan resources (since _connected is still False,
@@ -153,6 +174,12 @@ class BanditoClient:
             # executors, so pending flushes complete before process exit.
             self._executor = ThreadPoolExecutor(max_workers=1)
             self._connected = True
+
+            # S3 dumps run on a separate 30s timer, independent of cloud flush.
+            if self._s3_client is not None:
+                self._s3_timer = threading.Timer(30.0, self._s3_flush_tick)
+                self._s3_timer.daemon = True
+                self._s3_timer.start()
         except Exception:
             self._http.close()
             self._http = None
@@ -203,8 +230,8 @@ class BanditoClient:
             query_length = len(query) if query else None
 
             # Delegate to Rust engine
-            exclude_i32 = [int(x) for x in exclude] if exclude else None
-            result_json = engine.pull(query_length, exclude_i32)
+            exclude_ids = [int(x) for x in exclude] if exclude else None
+            result_json = engine.pull(query_length, exclude_ids)
             raw = json.loads(result_json)
 
             winner_arm_id = int(raw["arm_id"])
@@ -283,6 +310,7 @@ class BanditoClient:
         event: dict[str, Any] = {
             "local_event_uuid": pull_result.event_id,
             "bandit_id": pull_result.bandit_id,
+            "bandit_name": pull_result.bandit_name,
             "arm_id": pull_result.arm.arm_id,
             "model_name": pull_result.arm.model_name,
             "model_provider": pull_result.arm.model_provider,
@@ -361,9 +389,17 @@ class BanditoClient:
             self._executor.shutdown(wait=True)
             self._executor = None
 
+        if self._s3_timer:
+            self._s3_timer.cancel()
+            self._s3_timer = None
+
         # Final synchronous flush — catches anything the last submit missed
         if self._store and self._http:
             self._flush_pending()
+
+        # Final S3 drain — catches events not yet exported by the periodic timer
+        if self._s3_client is not None and self._store:
+            self._dump_pending_to_s3()
 
         if self._store:
             self._store.close()
@@ -422,7 +458,11 @@ class BanditoClient:
                 existing_engine.update_from_sync(bandit_json)
                 new_engines[name] = existing_engine
             else:
-                new_engines[name] = BanditEngine(bandit_json, self._seed)
+                # Use explicit seed for deterministic testing; OS entropy for production
+                seed = self._seed
+                if seed is None:
+                    seed = int.from_bytes(os.urandom(8), 'big')
+                new_engines[name] = BanditEngine(bandit_json, seed)
 
             new_bandits[name] = _BanditCache(
                 bandit_id=b["bandit_id"],
@@ -490,7 +530,7 @@ class BanditoClient:
 
             # Outside lock: HTTP call (may be slow)
             payload = prepare_cloud_payload(pending, include_text=(self._data_storage != "local"))
-            logger.debug("Flush payload: %s", payload)
+            logger.debug("Flushing %d events", len(payload))
             result = self._http.ingest_events(payload)
 
             warning = result.get("warning")
@@ -544,3 +584,47 @@ class BanditoClient:
             )
         except Exception:
             logger.warning("Failed to flush pending events", exc_info=True)
+
+    def _s3_flush_tick(self) -> None:
+        """Periodic S3 export tick — runs every 30s on a daemon timer."""
+        if self._s3_client is not None:
+            self._dump_pending_to_s3()
+        if self._connected:
+            self._s3_timer = threading.Timer(30.0, self._s3_flush_tick)
+            self._s3_timer.daemon = True
+            self._s3_timer.start()
+
+    def _dump_pending_to_s3(self) -> None:
+        """Export un-uploaded events to S3 as raw event JSON. One file per event.
+
+        Key pattern: {prefix}/{bandit_name}/{YYYY/MM/DD}/{local_event_uuid}.json
+        Body: the raw event dict (same structure as SQLite payload column).
+        """
+        events_with_ts = self._store.pending_s3(limit=100)
+        if not events_with_ts:
+            return
+
+        uploaded: list[str] = []
+        try:
+            for event, created_at in events_with_ts:
+                uuid_str = event.get("local_event_uuid", "")
+                raw_name = event.get("bandit_name") or "unknown"
+                bandit_name = re.sub(r"[^\w\-.]", "_", raw_name)
+                date = datetime.datetime.utcfromtimestamp(created_at)
+                key = (
+                    f"{self._s3_config.prefix}/{bandit_name}/"
+                    f"{date:%Y/%m/%d}/{uuid_str}.json"
+                )
+                self._s3_client.put_object(
+                    Bucket=self._s3_config.bucket,
+                    Key=key,
+                    Body=json.dumps(event).encode("utf-8"),
+                    ContentType="application/json",
+                )
+                uploaded.append(uuid_str)
+        except Exception:
+            logger.warning("Failed to export events to S3", exc_info=True)
+        finally:
+            if uploaded:
+                self._store.mark_s3_exported(uploaded)
+                logger.debug("Exported %d events to S3", len(uploaded))
