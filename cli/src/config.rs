@@ -6,6 +6,48 @@ use std::path::PathBuf;
 const DEFAULT_BASE_URL: &str = "https://bandito-api.onrender.com";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct S3Config {
+    pub bucket: String,
+    #[serde(default = "default_s3_prefix")]
+    pub prefix: String,
+    #[serde(default = "default_s3_region")]
+    pub region: String,
+    /// Optional custom endpoint for MinIO / LocalStack / other S3-compatible stores.
+    /// Also readable via AWS_ENDPOINT_URL env var.
+    #[serde(default)]
+    pub endpoint: Option<String>,
+}
+
+fn default_s3_prefix() -> String {
+    "bandito".to_string()
+}
+
+fn default_s3_region() -> String {
+    "us-east-1".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JudgeConfig {
+    #[serde(default)]
+    pub api_key: String,
+    #[serde(default = "default_judge_model")]
+    pub model: String,
+}
+
+impl Default for JudgeConfig {
+    fn default() -> Self {
+        Self {
+            api_key: String::new(),
+            model: default_judge_model(),
+        }
+    }
+}
+
+fn default_judge_model() -> String {
+    "gpt-4o-mini".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
     #[serde(default)]
     pub api_key: String,
@@ -13,6 +55,10 @@ pub struct Config {
     pub base_url: String,
     #[serde(default = "default_data_storage")]
     pub data_storage: String,
+    #[serde(default)]
+    pub s3: Option<S3Config>,
+    #[serde(default)]
+    pub judge: JudgeConfig,
 }
 
 fn default_base_url() -> String {
@@ -40,10 +86,13 @@ impl Config {
         }
         let contents = fs::read_to_string(&path)
             .with_context(|| format!("Failed to read {}", path.display()))?;
-        let config: Config = toml::from_str(&contents).unwrap_or_else(|e| {
+        let mut config: Config = toml::from_str(&contents).unwrap_or_else(|e| {
             eprintln!("Warning: failed to parse config ({}), using defaults", e);
             Config::default()
         });
+        if let Ok(k) = std::env::var("JUDGE_API_KEY") {
+            config.judge.api_key = k;
+        }
         Ok(config)
     }
 
@@ -55,11 +104,31 @@ impl Config {
         // Write TOML manually to ensure proper escaping
         // base_url is intentionally omitted — always uses the default
         // (overridable via BANDITO_BASE_URL env var for development)
-        let contents = format!(
+        let mut contents = format!(
             "api_key = {}\ndata_storage = {}\n",
             escape_toml_value(&self.api_key),
             escape_toml_value(&self.data_storage),
         );
+        if let Some(s3) = &self.s3 {
+            contents.push_str(&format!(
+                "\n[s3]\nbucket = {}\nprefix = {}\nregion = {}\n",
+                escape_toml_value(&s3.bucket),
+                escape_toml_value(&s3.prefix),
+                escape_toml_value(&s3.region),
+            ));
+            if let Some(ep) = &s3.endpoint {
+                contents.push_str(&format!("endpoint = {}\n", escape_toml_value(ep)));
+            }
+        }
+        // Preserve judge section if an api_key is set, so `bandito config`
+        // doesn't silently drop it on re-save.
+        if !self.judge.api_key.is_empty() {
+            contents.push_str(&format!(
+                "\n[judge]\napi_key = {}\nmodel = {}\n",
+                escape_toml_value(&self.judge.api_key),
+                escape_toml_value(&self.judge.model),
+            ));
+        }
         fs::write(&path, contents)
             .with_context(|| format!("Failed to write {}", path.display()))?;
         Ok(())

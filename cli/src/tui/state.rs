@@ -3,6 +3,7 @@ use ratatui::prelude::*;
 use std::collections::HashSet;
 
 use crate::http::HttpClient;
+use crate::s3::S3Hydrator;
 use crate::store::EventStore;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -30,6 +31,8 @@ pub struct App {
     pub screen: Screen,
     pub http: HttpClient,
     pub store: Option<EventStore>,
+    /// Set when data_storage = "s3". Populates the ephemeral store on each load.
+    pub s3_hydrator: Option<S3Hydrator>,
 
     // Bandit select
     pub bandits: Vec<BanditInfo>,
@@ -72,11 +75,12 @@ pub struct MergedEvent {
 }
 
 impl App {
-    pub fn new(http: HttpClient, store: Option<EventStore>) -> Self {
+    pub fn new(http: HttpClient, store: Option<EventStore>, s3_hydrator: Option<S3Hydrator>) -> Self {
         Self {
             screen: Screen::BanditSelect,
             http,
             store,
+            s3_hydrator,
             bandits: Vec::new(),
             bandit_index: 0,
             current_bandit: None,
@@ -158,6 +162,7 @@ impl App {
             None => return Ok(()),
         };
 
+        // Cloud path — always the authoritative source for ungraded event list.
         let resp = self.http.get(
             "/events",
             &[
@@ -169,7 +174,26 @@ impl App {
 
         let items = resp["items"].as_array().cloned().unwrap_or_default();
 
-        // Extract UUIDs for local text lookup
+        // S3 mode: download event text from S3 into an ephemeral SQLite.
+        // This replaces self.store for this load; runs before the UUID lookup below.
+        if let Some(hydrator) = &self.s3_hydrator {
+            match hydrator.hydrate(&bandit.name, &items) {
+                Ok((store, fetched, missing)) => {
+                    self.store = Some(store);
+                    if missing > 0 {
+                        self.show_toast(
+                            format!("S3: {} loaded, {} not found", fetched, missing),
+                            ToastKind::Info,
+                        );
+                    }
+                }
+                Err(e) => {
+                    self.show_toast(format!("S3 fetch failed: {}", e), ToastKind::Error);
+                }
+            }
+        }
+
+        // Extract UUIDs for local text lookup (local store or ephemeral S3 store)
         let uuids: Vec<String> = items
             .iter()
             .filter_map(|e| e["local_event_uuid"].as_str().map(String::from))

@@ -3,7 +3,13 @@ use dialoguer::Select;
 use std::fs;
 use std::path::Path;
 
-const SKILL_CONTENT: &str = include_str!("../../../skills/bandito/SKILL.md");
+const SKILL_MD: &str = include_str!("../../../skills/bandito/SKILL.md");
+const PHASE_ONBOARDING: &str = include_str!("../../../skills/bandito/phases/onboarding.md");
+const PHASE_INTEGRATION: &str = include_str!("../../../skills/bandito/phases/integration.md");
+const PHASE_REWARD_DESIGN: &str = include_str!("../../../skills/bandito/phases/reward-design.md");
+const PHASE_OPERATIONS: &str = include_str!("../../../skills/bandito/phases/operations.md");
+const PHASE_JUDGE: &str = include_str!("../../../skills/bandito/phases/judge.md");
+const REF_CLI: &str = include_str!("../../../skills/bandito/references/cli-reference.md");
 
 #[derive(Clone, Copy)]
 enum AiTool {
@@ -49,18 +55,24 @@ pub fn run() -> Result<()> {
 
     let tool = TOOLS[selection];
     let dir = Path::new(tool.skill_dir());
-    let file = dir.join("SKILL.md");
+    let updated = dir.join("SKILL.md").exists();
 
-    let updated = file.exists();
+    fs::create_dir_all(dir.join("phases"))?;
+    fs::create_dir_all(dir.join("references"))?;
 
-    fs::create_dir_all(dir)?;
-    fs::write(&file, SKILL_CONTENT)?;
+    fs::write(dir.join("SKILL.md"), SKILL_MD)?;
+    fs::write(dir.join("phases/onboarding.md"), PHASE_ONBOARDING)?;
+    fs::write(dir.join("phases/integration.md"), PHASE_INTEGRATION)?;
+    fs::write(dir.join("phases/reward-design.md"), PHASE_REWARD_DESIGN)?;
+    fs::write(dir.join("phases/operations.md"), PHASE_OPERATIONS)?;
+    fs::write(dir.join("phases/judge.md"), PHASE_JUDGE)?;
+    fs::write(dir.join("references/cli-reference.md"), REF_CLI)?;
 
     if updated {
-        println!("Updated {} skill at {}/SKILL.md", tool.label(), tool.skill_dir());
+        println!("Updated {} skill at {}/", tool.label(), tool.skill_dir());
     } else {
         println!(
-            "Installed {} skill at {}/SKILL.md",
+            "Installed {} skill at {}/",
             tool.label(),
             tool.skill_dir()
         );

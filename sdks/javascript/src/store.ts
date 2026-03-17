@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS events (
     status           TEXT NOT NULL DEFAULT 'pending',
     created_at       REAL NOT NULL,
     human_reward     REAL,
-    graded_at        REAL
+    graded_at        REAL,
+    s3_exported      INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_events_status ON events(status);
 `;
@@ -25,12 +26,16 @@ CREATE INDEX IF NOT EXISTS idx_events_status ON events(status);
 const MIGRATION_GRADING = [
   "ALTER TABLE events ADD COLUMN human_reward REAL",
   "ALTER TABLE events ADD COLUMN graded_at REAL",
+  "ALTER TABLE events ADD COLUMN s3_exported INTEGER NOT NULL DEFAULT 0",
 ];
 
 export interface EventPayload {
   local_event_uuid: string;
   bandit_id: number;
   arm_id: number;
+  model_name: string;
+  model_provider: string;
+  bandit_name?: string;
   [key: string]: unknown;
 }
 
@@ -54,7 +59,7 @@ export class EventStore {
        VALUES (?, ?, ?, ?, 'pending', ?)`,
     );
     this.pendingStmt = this.db.prepare(
-      `SELECT payload FROM events WHERE status = 'pending'
+      `SELECT local_event_uuid, payload FROM events WHERE status = 'pending'
        ORDER BY created_at ASC LIMIT ?`,
     );
   }
@@ -72,8 +77,26 @@ export class EventStore {
 
   /** Return up to `limit` pending events (oldest first). */
   pending(limit: number = 50): EventPayload[] {
-    const rows = this.pendingStmt.all(limit) as { payload: string }[];
-    return rows.map((row) => JSON.parse(row.payload));
+    const rows = this.pendingStmt.all(limit) as {
+      local_event_uuid: string;
+      payload: string;
+    }[];
+    const results: EventPayload[] = [];
+    const corrupt: string[] = [];
+    for (const row of rows) {
+      try {
+        results.push(JSON.parse(row.payload) as EventPayload);
+      } catch {
+        console.warn(
+          `[bandito] Discarding corrupt event ${row.local_event_uuid} from store`,
+        );
+        corrupt.push(row.local_event_uuid);
+      }
+    }
+    if (corrupt.length > 0) {
+      this.markFlushed(corrupt);
+    }
+    return results;
   }
 
   /** Mark events as successfully flushed to cloud. */
@@ -96,6 +119,26 @@ export class EventStore {
          WHERE local_event_uuid = ?`,
       )
       .run(reward, Date.now() / 1000, uuid);
+  }
+
+  /** Return un-exported events as {event, ts} for S3 dump. */
+  pendingS3(limit: number = 100): Array<{ event: Record<string, unknown>; ts: number }> {
+    const rows = this.db
+      .prepare(
+        `SELECT payload, created_at FROM events WHERE s3_exported = 0
+         ORDER BY created_at ASC LIMIT ?`,
+      )
+      .all(limit) as { payload: string; created_at: number }[];
+    return rows.map((r) => ({ event: JSON.parse(r.payload) as Record<string, unknown>, ts: r.created_at }));
+  }
+
+  /** Mark events as successfully exported to S3. */
+  markS3Exported(uuids: string[]): void {
+    if (uuids.length === 0) return;
+    const placeholders = uuids.map(() => "?").join(",");
+    this.db
+      .prepare(`UPDATE events SET s3_exported = 1 WHERE local_event_uuid IN (${placeholders})`)
+      .run(...uuids);
   }
 
   /** Close the database connection. */

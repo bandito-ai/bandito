@@ -2,7 +2,7 @@ mod screens;
 mod state;
 mod widgets;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use crossterm::{
     event::{self, Event, KeyCode, KeyModifiers},
     execute,
@@ -13,6 +13,7 @@ use std::io;
 
 use crate::config::Config;
 use crate::http::HttpClient;
+use crate::s3::S3Hydrator;
 use crate::store::EventStore;
 use state::{App, Screen};
 
@@ -23,8 +24,24 @@ pub fn run() -> Result<()> {
     }
 
     let http = HttpClient::from_config(&config)?;
-    let store = EventStore::open()?;
-    let mut app = App::new(http, store);
+
+    let (store, hydrator) = if config.data_storage == "s3" {
+        match config.s3.clone() {
+            Some(s3_cfg) => {
+                let hydrator = S3Hydrator::new(s3_cfg)
+                    .context("Failed to initialize S3 client — check AWS credentials and S3 config")?;
+                (None, Some(hydrator))
+            }
+            None => {
+                eprintln!("[bandito] Warning: data_storage=s3 but no [s3] config found — falling back to local store");
+                (EventStore::open()?, None)
+            }
+        }
+    } else {
+        (EventStore::open()?, None)
+    };
+
+    let mut app = App::new(http, store, hydrator);
 
     // Load bandits for the initial screen
     app.load_bandits()?;

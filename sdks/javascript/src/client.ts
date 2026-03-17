@@ -67,9 +67,14 @@ export class BanditoClient {
   private bandits: Map<string, BanditCache> = new Map();
   private connected = false;
   private flushInterval: ReturnType<typeof setInterval> | null = null;
+  private s3FlushInterval: ReturnType<typeof setInterval> | null = null;
   private flushInProgress = false;
   private deadUuids: Set<string> = new Set();
   private retryCounts: Map<string, number> = new Map();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private _s3Client: any = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private _s3Config: any = null;
 
   constructor(options: ClientOptions = {}) {
     this.apiKey = options.apiKey;
@@ -119,6 +124,26 @@ export class BanditoClient {
     }
     this.store = new EventStore(storePath);
 
+    // Init S3 exporter if data_storage is "s3"
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    this._s3Client = null as any;
+    this._s3Config = null;
+    if (this.dataStorage === "s3" && config.s3) {
+      try {
+        const { S3Client } = await import("@aws-sdk/client-s3");
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const s3ClientConfig: Record<string, any> = { region: config.s3.region };
+        if (config.s3.endpoint) {
+          s3ClientConfig.endpoint = config.s3.endpoint;
+          s3ClientConfig.forcePathStyle = true; // required for MinIO / path-style S3
+        }
+        this._s3Client = new S3Client(s3ClientConfig);
+        this._s3Config = config.s3;
+      } catch {
+        console.warn("[bandito] data_storage='s3' requires @aws-sdk/client-s3");
+      }
+    }
+
     // Bootstrap: fetch state, hydrate cache, flush pending
     try {
       const data = await this.http.connect();
@@ -131,10 +156,21 @@ export class BanditoClient {
       // Flush pending events from previous crash
       await this.flushPending();
 
-      // Start periodic flush (every 30s)
+      // Start periodic cloud flush (every 30s)
       this.flushInterval = setInterval(() => {
-        this.flushPending().catch(() => {});
+        this.flushPending().catch((err) =>
+          console.warn("[bandito] Periodic flush error", err),
+        );
       }, 30_000);
+
+      // S3 dumps run on a separate 30s timer, independent of cloud flush
+      if (this._s3Client !== null) {
+        this.s3FlushInterval = setInterval(() => {
+          this.dumpPendingToS3().catch((err) =>
+            console.warn("[bandito] Periodic S3 export error", err),
+          );
+        }, 30_000);
+      }
 
       this.connected = true;
     } catch (err) {
@@ -214,6 +250,7 @@ export class BanditoClient {
       arm_id: pullResult.arm.armId,
       model_name: pullResult.arm.modelName,
       model_provider: pullResult.arm.modelProvider,
+      bandit_name: pullResult.banditName,
     };
 
     if (options.queryText != null) {
@@ -251,7 +288,9 @@ export class BanditoClient {
     this.store!.push(event);
 
     // Fire-and-forget flush (errors logged inside flushPending)
-    this.flushPending().catch(() => {});
+    this.flushPending().catch((err) =>
+      console.warn("[bandito] Flush error", err),
+    );
   }
 
   /**
@@ -290,9 +329,19 @@ export class BanditoClient {
       this.flushInterval = null;
     }
 
-    // Final flush
+    if (this.s3FlushInterval) {
+      clearInterval(this.s3FlushInterval);
+      this.s3FlushInterval = null;
+    }
+
+    // Final cloud flush
     if (this.store && this.http) {
       await this.flushPending();
+    }
+
+    // Final S3 drain — catches events not yet exported by the periodic timer
+    if (this._s3Client !== null && this.store) {
+      await this.dumpPendingToS3();
     }
 
     this.store?.close();
@@ -401,11 +450,55 @@ export class BanditoClient {
       if (flushedUuids.length > 0 && this.store) {
         this.store.markFlushed(flushedUuids);
       }
+
     } catch (err) {
       // Flush failure is non-fatal — events stay pending for next attempt
       console.warn("[bandito] Event flush failed — will retry", err);
     } finally {
       this.flushInProgress = false;
+    }
+  }
+
+  /**
+   * Export un-uploaded events to S3 as raw event JSON. One file per event.
+   *
+   * Key pattern: {prefix}/{bandit_name}/{YYYY/MM/DD}/{local_event_uuid}.json
+   * Body: the raw event object (same structure as SQLite payload column).
+   */
+  private async dumpPendingToS3(): Promise<void> {
+    const eventsWithTs = this.store!.pendingS3(100);
+    if (eventsWithTs.length === 0) return;
+
+    const { PutObjectCommand } = await import("@aws-sdk/client-s3");
+    const uploaded: string[] = [];
+
+    try {
+      for (const { event, ts } of eventsWithTs) {
+        const uuid = event.local_event_uuid as string;
+        const rawName = (event.bandit_name as string | undefined) || "unknown";
+        const banditName = rawName.replace(/[^\w\-.]/g, "_");
+        const date = new Date(ts * 1000);
+        const datePath = [
+          date.getUTCFullYear(),
+          String(date.getUTCMonth() + 1).padStart(2, "0"),
+          String(date.getUTCDate()).padStart(2, "0"),
+        ].join("/");
+        const key = `${this._s3Config.prefix}/${banditName}/${datePath}/${uuid}.json`;
+
+        await this._s3Client.send(new PutObjectCommand({
+          Bucket: this._s3Config.bucket,
+          Key: key,
+          Body: JSON.stringify(event),
+          ContentType: "application/json",
+        }));
+        uploaded.push(uuid);
+      }
+    } catch (err) {
+      console.warn("[bandito] S3 export failed — will retry", err);
+    } finally {
+      if (uploaded.length > 0) {
+        this.store!.markS3Exported(uploaded);
+      }
     }
   }
 }

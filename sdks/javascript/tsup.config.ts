@@ -7,7 +7,7 @@ export default defineConfig({
   splitting: false,
   sourcemap: true,
   clean: true,
-  external: ["better-sqlite3"],
+  external: ["better-sqlite3", "@opentelemetry/sdk-trace-node", "@opentelemetry/exporter-trace-otlp-http", "@aws-sdk/client-s3"],
   esbuildOptions(options) {
     options.external = [...(options.external ?? []), "../wasm/bandito_engine"];
   },

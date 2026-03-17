@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -31,6 +32,12 @@ class BanditoHTTP:
     """
 
     def __init__(self, base_url: str, api_key: str, timeout: float = 10.0):
+        # Validate URL scheme — reject non-http(s) protocols (file://, javascript:, etc.)
+        parsed = urlparse(base_url)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(
+                f"base_url must use http or https, got '{parsed.scheme}' — check your config"
+            )
         self._client = httpx.Client(
             base_url=f"{base_url.rstrip('/')}/api/v1",
             headers={"X-API-Key": api_key},
@@ -48,11 +55,14 @@ class BanditoHTTP:
             except Exception as exc:
                 last_exc = exc
                 if isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code < 500:
-                    # Log full response body for client errors (4xx) — critical for debugging
-                    # Pydantic 422 validation errors, auth failures, etc.
+                    # Log status at WARNING; body at DEBUG only (may contain sensitive data)
                     logger.warning(
-                        "%s %s → %d: %s",
-                        method, path, exc.response.status_code, exc.response.text,
+                        "%s %s → %d",
+                        method, path, exc.response.status_code,
+                    )
+                    logger.debug(
+                        "Response body (%.500s)",
+                        exc.response.text,
                     )
                 if not _is_retryable(exc) or attempt == MAX_RETRIES - 1:
                     raise

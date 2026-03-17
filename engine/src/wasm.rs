@@ -31,14 +31,16 @@ impl BanditEngine {
     }
 
     /// Pure math pull — returns JSON { arm_index, arm_id, scores }.
+    /// exclude_ids uses i32 (JS number) at the WASM boundary; cast to i64 internally.
     #[wasm_bindgen(js_name = pull)]
     pub fn pull_wasm(
         &mut self,
         query_length: Option<usize>,
         exclude_ids: Option<Vec<i32>>,
     ) -> Result<String, JsValue> {
+        let exclude_i64 = exclude_ids.map(|ids| ids.into_iter().map(|id| id as i64).collect());
         self.inner
-            .pull_inner(query_length, exclude_ids)
+            .pull_inner(query_length, exclude_i64)
             .map_err(|e| JsValue::from_str(&e))
     }
 

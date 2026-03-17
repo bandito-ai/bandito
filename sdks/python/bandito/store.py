@@ -23,7 +23,8 @@ CREATE TABLE IF NOT EXISTS events (
     status           TEXT NOT NULL DEFAULT 'pending',
     created_at       REAL NOT NULL,
     human_reward     REAL,
-    graded_at        REAL
+    graded_at        REAL,
+    s3_exported      INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_events_status ON events(status);
 """
@@ -31,6 +32,7 @@ CREATE INDEX IF NOT EXISTS idx_events_status ON events(status);
 _MIGRATION_GRADING = [
     "ALTER TABLE events ADD COLUMN human_reward REAL",
     "ALTER TABLE events ADD COLUMN graded_at REAL",
+    "ALTER TABLE events ADD COLUMN s3_exported INTEGER NOT NULL DEFAULT 0",
 ]
 
 
@@ -151,6 +153,29 @@ class EventStore:
                 "UPDATE events SET human_reward = ?, graded_at = ? "
                 "WHERE local_event_uuid = ?",
                 (reward, time.time(), uuid),
+            )
+            self._conn.commit()
+
+    def pending_s3(self, limit: int = 100) -> list[tuple[dict[str, Any], float]]:
+        """Return un-exported events as (payload, created_at) for S3 dump."""
+        with self._lock:
+            cursor = self._conn.execute(
+                "SELECT payload, created_at FROM events WHERE s3_exported = 0 "
+                "ORDER BY created_at ASC LIMIT ?",
+                (limit,),
+            )
+            return [(json.loads(row[0]), row[1]) for row in cursor.fetchall()]
+
+    def mark_s3_exported(self, uuids: list[str]) -> None:
+        """Mark events as successfully exported to S3."""
+        if not uuids:
+            return
+        with self._lock:
+            placeholders = ",".join("?" for _ in uuids)
+            self._conn.execute(
+                f"UPDATE events SET s3_exported = 1 "
+                f"WHERE local_event_uuid IN ({placeholders})",
+                uuids,
             )
             self._conn.commit()
 

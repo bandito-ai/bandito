@@ -88,9 +88,9 @@ pub fn bayesian_update_delta(
 /// chol = cholesky(A^{-1} + jitter * I)
 ///
 /// Returns (theta, chol) where chol is flattened row-major d x d.
-pub fn compute_posterior(a: &[f64], b: &[f64], d: usize, jitter: f64) -> (Vec<f64>, Vec<f64>) {
+pub fn compute_posterior(a: &[f64], b: &[f64], d: usize, jitter: f64) -> Result<(Vec<f64>, Vec<f64>), String> {
     // Compute A^{-1} via Cholesky of A, then solve
-    let a_chol = cholesky(a, d).expect("A must be positive definite for posterior computation");
+    let a_chol = cholesky(a, d)?;
 
     // theta = A^{-1} b via forward/back substitution on A's Cholesky
     let theta = cholesky_solve(&a_chol, b, d);
@@ -107,9 +107,9 @@ pub fn compute_posterior(a: &[f64], b: &[f64], d: usize, jitter: f64) -> (Vec<f6
     }
 
     // chol = cholesky(A_inv + jitter * I)
-    let chol = safe_cholesky(&a_inv, d, jitter);
+    let chol = safe_cholesky(&a_inv, d, jitter)?;
 
-    (theta, chol)
+    Ok((theta, chol))
 }
 
 /// Cholesky decomposition of a symmetric positive-definite matrix.
@@ -146,13 +146,14 @@ fn cholesky(m: &[f64], d: usize) -> Result<Vec<f64>, String> {
 
 /// Cholesky decomposition with static diagonal jitter.
 ///
-/// Computes cholesky(M + jitter * I).
-pub fn safe_cholesky(m: &[f64], d: usize, jitter: f64) -> Vec<f64> {
+/// Computes cholesky(M + jitter * I). Returns Err if the matrix is not
+/// positive definite even after jittering (indicates fundamentally broken state).
+pub fn safe_cholesky(m: &[f64], d: usize, jitter: f64) -> Result<Vec<f64>, String> {
     let mut jittered = m.to_vec();
     for i in 0..d {
         jittered[i * d + i] += jitter;
     }
-    cholesky(&jittered, d).expect("Cholesky failed even with jitter — matrix is fundamentally broken")
+    cholesky(&jittered, d).map_err(|e| format!("safe_cholesky failed (matrix not PSD even with jitter): {}", e))
 }
 
 /// Solve L * L^T * x = b where L is lower-triangular (from Cholesky).
@@ -324,7 +325,7 @@ mod tests {
         for i in 0..d {
             m[i * d + i] = 1.0;
         }
-        let l = safe_cholesky(&m, d, CHOLESKY_JITTER);
+        let l = safe_cholesky(&m, d, CHOLESKY_JITTER).unwrap();
         // Should be close to identity (jitter is tiny)
         for i in 0..d {
             assert!((l[i * d + i] - (1.0_f64 + CHOLESKY_JITTER).sqrt()).abs() < 1e-5);
@@ -339,7 +340,7 @@ mod tests {
         // b = [1, 2]
         let b = vec![1.0, 2.0];
 
-        let (theta, chol) = compute_posterior(&a, &b, d, CHOLESKY_JITTER);
+        let (theta, chol) = compute_posterior(&a, &b, d, CHOLESKY_JITTER).unwrap();
 
         // theta = A^{-1} b = [[0.5, 0], [0, 0.5]] @ [1, 2] = [0.5, 1.0]
         assert!((theta[0] - 0.5).abs() < 1e-10);

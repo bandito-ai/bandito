@@ -22,6 +22,18 @@ export class BanditoHTTP {
   private timeout: number;
 
   constructor(baseUrl: string, apiKey: string, timeout: number = 10_000) {
+    // Validate URL scheme — reject non-http(s) protocols (file://, javascript:, etc.)
+    let parsed: URL;
+    try {
+      parsed = new URL(baseUrl);
+    } catch {
+      throw new Error(`Invalid baseUrl: "${baseUrl}"`);
+    }
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+      throw new Error(
+        `baseUrl must use http or https, got "${parsed.protocol}" — check your config`,
+      );
+    }
     this.baseUrl = `${baseUrl.replace(/\/$/, "")}/api/v1`;
     this.apiKey = apiKey;
     this.timeout = timeout;
@@ -53,14 +65,16 @@ export class BanditoHTTP {
 
         if (!resp.ok) {
           const text = await resp.text().catch(() => "");
+          // Truncate body to avoid leaking sensitive content into error messages/logs
+          const preview = text.length > 200 ? `${text.slice(0, 200)}…` : text;
           if (!isRetryable(resp.status) || attempt === MAX_RETRIES - 1) {
             throw new Error(
-              `HTTP ${resp.status} on ${method} ${path}: ${text}`,
+              `HTTP ${resp.status} on ${method} ${path}: ${preview}`,
             );
           }
           // Retryable server error — fall through to retry
           lastError = new Error(
-            `HTTP ${resp.status} on ${method} ${path}: ${text}`,
+            `HTTP ${resp.status} on ${method} ${path}: ${preview}`,
           );
         } else {
           return (await resp.json()) as Record<string, unknown>;
