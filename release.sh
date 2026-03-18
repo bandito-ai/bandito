@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # release.sh <version>
-# Bumps version, tags, waits for CI, updates homebrew-tap.
+# After merging a PR (which triggers CI to build + publish SDKs + create GitHub release),
+# run this to update the homebrew-tap formula with real SHA256s.
 # Usage: ./release.sh 0.1.1
 set -euo pipefail
 
@@ -15,68 +16,25 @@ REPO="bandito-ai/bandito"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TAP_DIR="$SCRIPT_DIR/../homebrew-tap"
 
-echo "==> Releasing $TAG"
+echo "==> Updating homebrew-tap for $TAG"
 
-# ── 1. Bump version in all 5 files ───────────────────────────────────────────
+# ── 1. Verify release exists and is published ────────────────────────────────
 
-echo "--> Bumping version to $VERSION"
+echo "--> Checking GitHub release..."
+DRAFT=$(gh release view "$TAG" --repo "$REPO" --json isDraft --jq '.isDraft' 2>/dev/null || echo "not_found")
 
-sed -i '' "s/^version = \"[^\"]*\"/version = \"$VERSION\"/" "$SCRIPT_DIR/engine/Cargo.toml"
-sed -i '' "s/^version = \"[^\"]*\"/version = \"$VERSION\"/" "$SCRIPT_DIR/cli/Cargo.toml"
-sed -i '' "s/^version = \"[^\"]*\"/version = \"$VERSION\"/" "$SCRIPT_DIR/sdks/python/pyproject.toml"
-
-# package.json uses a different key format
-sed -i '' "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" "$SCRIPT_DIR/sdks/javascript/package.json"
-
-# homebrew-formula source (for reference; tap is updated separately below)
-sed -i '' "s/version \"[^\"]*\"/version \"$VERSION\"/" "$SCRIPT_DIR/homebrew-formula/bandito.rb"
-
-# ── 2. Commit, tag, push ─────────────────────────────────────────────────────
-
-echo "--> Committing and tagging $TAG"
-cd "$SCRIPT_DIR"
-git add -A
-git status --short
-git commit -m "$TAG"
-git tag "$TAG"
-git push origin main "$TAG"
-
-# ── 3. Wait for Release CI ───────────────────────────────────────────────────
-
-echo "--> Waiting for Release workflow to start..."
-RUN_ID=""
-for i in $(seq 1 30); do
-  RUN_ID=$(gh run list \
-    --workflow=release.yml \
-    --repo "$REPO" \
-    --limit 10 \
-    --json databaseId,headBranch \
-    --jq ".[] | select(.headBranch == \"$TAG\") | .databaseId" 2>/dev/null | head -1)
-  if [ -n "$RUN_ID" ]; then
-    echo "    Run ID: $RUN_ID"
-    break
-  fi
-  echo "    Not started yet... ($i/30)"
-  sleep 3
-done
-
-if [ -z "$RUN_ID" ]; then
-  echo "ERROR: Release workflow did not start within 90 seconds."
+if [ "$DRAFT" = "not_found" ]; then
+  echo "ERROR: Release $TAG not found. Wait for CI to complete."
   exit 1
 fi
 
-echo "--> Watching Release CI (this takes ~5 min)..."
-gh run watch "$RUN_ID" --repo "$REPO"
-
-# Confirm it succeeded
-STATUS=$(gh run view "$RUN_ID" --repo "$REPO" --json conclusion --jq '.conclusion')
-if [ "$STATUS" != "success" ]; then
-  echo "ERROR: Release workflow concluded with status: $STATUS"
-  echo "       Check: https://github.com/$REPO/actions/runs/$RUN_ID"
-  exit 1
+if [ "$DRAFT" = "true" ]; then
+  echo "    Release is a draft — publishing..."
+  gh release edit "$TAG" --draft=false --repo "$REPO"
+  echo "    Published."
 fi
 
-# ── 4. Download artifacts and compute hashes ─────────────────────────────────
+# ── 2. Download artifacts and compute hashes ─────────────────────────────────
 
 echo "--> Downloading release artifacts"
 TMPDIR=$(mktemp -d)
@@ -89,7 +47,6 @@ gh release download "$TAG" \
   --repo "$REPO"
 
 hash_file() {
-  # Works on both macOS (shasum) and Linux (sha256sum)
   if command -v sha256sum &>/dev/null; then
     sha256sum "$1" | awk '{print $1}'
   else
@@ -105,7 +62,7 @@ echo "    aarch64-apple-darwin:       $ARM64"
 echo "    x86_64-apple-darwin:        $X86_64"
 echo "    x86_64-unknown-linux-gnu:   $LINUX"
 
-# ── 5. Rewrite homebrew-tap formula ──────────────────────────────────────────
+# ── 3. Rewrite homebrew-tap formula ──────────────────────────────────────────
 
 echo "--> Updating $TAP_DIR/Formula/bandito.rb"
 
@@ -152,7 +109,7 @@ with open(path, "w") as f:
 print(f"    Written: {path}")
 EOF
 
-# ── 6. Commit and push homebrew-tap ──────────────────────────────────────────
+# ── 4. Commit and push homebrew-tap ──────────────────────────────────────────
 
 echo "--> Pushing homebrew-tap"
 cd "$TAP_DIR"
