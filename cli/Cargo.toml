@@ -1,6 +1,6 @@
 [package]
 name = "bandito-cli"
-version = "0.1.8"
+version = "0.1.9"
 edition = "2021"
 description = "CLI and TUI for Bandito contextual bandit optimizer"
 license = "MIT"
